@@ -1,0 +1,42 @@
+name: Deploy to Apps Script
+
+# 推送到 main（且 src/ 有變動）時，自動把程式碼推到 Apps Script，並更新網頁部署。
+# 需要在 GitHub repo 的 Settings > Secrets and variables > Actions 設定：
+#   CLASPRC_JSON   : 本機 `clasp login` 後 ~/.clasprc.json 的完整內容
+#   SCRIPT_ID      : Apps Script 專案 ID
+#   DEPLOYMENT_ID  : （選填）網頁應用程式的部署 ID；設定後網址不變、內容自動更新
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', '.github/workflows/deploy.yml']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check secrets
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          SCRIPT_ID: ${{ secrets.SCRIPT_ID }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ] || [ -z "$SCRIPT_ID" ]; then
+            echo "::warning::尚未設定 CLASPRC_JSON / SCRIPT_ID，略過部署。"; echo "SKIP=1" >> $GITHUB_ENV
+          fi
+      - name: Push to Apps Script
+        if: env.SKIP != '1'
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          SCRIPT_ID: ${{ secrets.SCRIPT_ID }}
+          DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          echo "$CLASPRC_JSON" > ~/.clasprc.json
+          printf '{"scriptId":"%s","rootDir":"src"}' "$SCRIPT_ID" > .clasp.json
+          npx -y @google/clasp@2.4.2 push -f
+          if [ -n "$DEPLOYMENT_ID" ]; then
+            npx -y @google/clasp@2.4.2 deploy -i "$DEPLOYMENT_ID" -d "GitHub ${GITHUB_SHA::7}"
+          fi
