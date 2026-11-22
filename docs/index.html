@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <base target="_top">
   <meta charset="utf-8">
   <meta name="theme-color" content="#f3f4f6" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0c0e12" media="(prefers-color-scheme: dark)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Roboto+Flex:opsz,wght@8..144,500;8..144,700&display=swap" rel="stylesheet">
-  <?!= include('Styles'); ?>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Stock Glance 台股觀測</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="top">
@@ -19,6 +20,9 @@
     <div class="status">
       <span id="mkt" class="pill"><i></i><b>載入中</b></span>
       <span id="upd" class="muted small"></span>
+      <button id="btnSettings" class="icon-btn" aria-label="連線設定">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
       <button id="btnRefresh" class="icon-btn" aria-label="重新整理">
         <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -27,6 +31,7 @@
 
   <main id="app">
     <div id="banner" class="banner" hidden></div>
+    <section id="v-setup" class="view" data-view="setup" hidden></section>
     <section id="v-overview" class="view" data-view="overview"><div class="skeleton"></div><div class="skeleton tall"></div></section>
     <section id="v-holdings" class="view" data-view="holdings" hidden></section>
     <section id="v-chips" class="view" data-view="chips" hidden></section>
@@ -57,6 +62,6 @@
 
   <div id="toast" class="toast" role="status"></div>
 
-  <?!= include('App'); ?>
+  <script src="app.js"></script>
 </body>
 </html>

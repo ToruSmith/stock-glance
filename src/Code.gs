@@ -1,17 +1,37 @@
 /**
- * Stock Glance — 網頁進入點與前端呼叫的 API
+ * Stock Glance — JSON API（給 GitHub Pages 上的網頁呼叫）
+ *
+ * GET ?api=dashboard|live|history|refreshChips&key=API金鑰[&id=代號&range=6mo]
+ * 回傳 { ok: true, data } 或 { ok: false, error }
+ * 部署設定：執行身分「我」、存取權「任何人」。資料由 API 金鑰保護。
  */
 
-function doGet() {
-  return HtmlService.createTemplateFromFile('index')
-    .evaluate()
-    .setTitle('Stock Glance 台股觀測')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  if (!p.api) return json_({ ok: true, name: 'Stock Glance API', hint: '請從 GitHub Pages 網頁使用' });
+  if (!checkKey_(p.key)) return json_({ ok: false, error: 'unauthorized' });
+  try {
+    let data;
+    switch (p.api) {
+      case 'dashboard': data = getDashboard(); break;
+      case 'live': data = getLive(); break;
+      case 'history': data = getHistory(String(p.id || ''), String(p.range || '6mo')); break;
+      case 'refreshChips': data = refreshChips(); break;
+      default: throw new Error('未知的 api：' + p.api);
+    }
+    return json_({ ok: true, data: data });
+  } catch (err) {
+    return json_({ ok: false, error: String((err && err.message) || err) });
+  }
 }
 
-function include(name) {
-  return HtmlService.createHtmlOutputFromFile(name).getContent();
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function checkKey_(k) {
+  const key = PropertiesService.getScriptProperties().getProperty('API_KEY');
+  return !!key && typeof k === 'string' && k === key;
 }
 
 /* ---------------- 共用 ---------------- */

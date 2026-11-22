@@ -4,10 +4,34 @@
  */
 
 function setup() {
+  setupApiKey();
   ensureSheets_();
   installTriggers();
   const n = backfillChips(25);
   Logger.log('完成：已建立排程，補齊 ' + n + ' 個交易日的籌碼資料。');
+}
+
+/** 建立 API 金鑰（已存在就沿用），並印在執行記錄裡 */
+function setupApiKey() {
+  const props = PropertiesService.getScriptProperties();
+  let key = props.getProperty('API_KEY');
+  if (!key) {
+    key = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+    props.setProperty('API_KEY', key);
+  }
+  Logger.log('API 金鑰：' + key);
+  return key;
+}
+
+/** 想再看一次金鑰時執行 */
+function showApiKey() {
+  return setupApiKey();
+}
+
+/** 金鑰外流時執行：產生新金鑰，舊的立即失效 */
+function rotateApiKey() {
+  PropertiesService.getScriptProperties().deleteProperty('API_KEY');
+  return setupApiKey();
 }
 
 function ensureSheets_() {

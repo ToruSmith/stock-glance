@@ -12,21 +12,26 @@
 ## 架構
 
 ```
-手機瀏覽器 ──► Apps Script 網頁 (doGet)
-                 ├─ 證交所 MIS 即時報價  （盤中台股與加權指數）
-                 ├─ Yahoo Finance 日線   （美股、VIX、匯率、歷史走勢、配息）
-                 ├─ 證交所盤後資料       （三大法人 BFI82U、融資 MI_MARGN、個股日成交備援）
-                 └─ Google Sheet         （持股、籌碼紀錄、觀察筆記、設定）
+GitHub Pages（docs/，網頁）
+   │  fetch ?api=…&key=…
+   ▼
+Apps Script（src/，JSON API）
+   ├─ 證交所 MIS 即時報價  （盤中台股與加權指數）
+   ├─ Yahoo Finance 日線   （美股、VIX、匯率、歷史走勢、配息）
+   ├─ 證交所盤後資料       （三大法人 BFI82U、融資 MI_MARGN、個股日成交備援）
+   └─ Google Sheet         （持股、籌碼紀錄、觀察筆記、設定）
 ```
+
+GitHub 上只有程式碼，沒有任何持股資料。API 金鑰存在 Apps Script 的指令碼屬性，以及你自己瀏覽器的 localStorage。
 
 | 檔案 | 用途 |
 | --- | --- |
-| `src/Config.gs` | Sheet ID、指標清單、資料連結 |
+| `docs/index.html` `styles.css` `app.js` | 網頁（GitHub Pages）。不依賴任何外部 JS 套件，圖表為自繪 SVG |
+| `src/Code.gs` | `doGet` JSON API、損益計算 |
 | `src/Fetchers.gs` | 所有對外抓資料的程式與快取 |
 | `src/Signals.gs` | 反彈訊號的判斷規則 |
-| `src/Code.gs` | 網頁進入點、前端呼叫的 API、損益計算 |
-| `src/Setup.gs` | 初始化、每日排程、籌碼回補 |
-| `src/index.html` `Styles.html` `App.html` | 前端（不依賴任何外部 JS 套件，圖表為自繪 SVG） |
+| `src/Setup.gs` | 初始化、API 金鑰、每日排程、籌碼回補 |
+| `src/Config.gs` | Sheet ID、指標清單、資料連結 |
 | `tests/harness.js` | 用假服務與合成資料在本機測試後端並產生預覽頁 |
 
 ## 資料 Sheet
@@ -40,33 +45,32 @@
 
 要改用別的 Sheet，可以修改 `Config.gs` 的 `SHEET_ID`，或在 Apps Script「專案設定 › 指令碼屬性」新增 `SHEET_ID`。
 
-## 部署（第一次約 10 分鐘）
+## 部署
 
-### 方法 A：直接貼上（最簡單）
+### 1. Apps Script（API）
 
-1. 到 <https://script.google.com> 建立新專案，命名為 `Stock Glance`。
-2. 「專案設定」勾選「在編輯器中顯示 appsscript.json 資訊清單檔案」，再把 `src/appsscript.json` 的內容貼進去。
-3. 依照 `src/` 的檔名建立檔案並貼上內容：指令碼檔案有 `Config`、`Fetchers`、`Signals`、`Code`、`Setup`；HTML 檔案有 `index`、`Styles`、`App`。
-4. 在上方函式選單選 `setup`，按「執行」，然後依提示授權。這一步會建立每日 22:00 的籌碼排程，並回補最近 25 個交易日的籌碼，大約需要 2～4 分鐘。
-5. 按「部署 › 新增部署作業」，類型選「網頁應用程式」，執行身分選「我」，存取權選「只有我自己」，然後按部署。
-6. 用手機打開部署網址。iPhone 可以按 Safari 的「分享 › 加入主畫面」，Android 用 Chrome 選單裡的「加到主畫面」。
+1. 在 <https://script.google.com> 建立專案，把 `src/` 的 6 個檔案貼進去（`appsscript.json` 要先在「專案設定」勾選顯示資訊清單檔案）。
+2. 執行 `setup` 並授權：建立 API 金鑰、每日 22:00 籌碼排程，並回補 25 個交易日的籌碼。
+3. 執行 `showApiKey`，從「執行記錄」複製金鑰。
+4. 「部署 › 新增部署作業 › 網頁應用程式」：執行身分選**我**、存取權選**任何人**。之後改程式時，用「管理部署作業 › 編輯 › 版本：新版本」，網址就不會變。
 
-### 方法 B：用 clasp 從這個 repo 同步
+金鑰外流時執行 `rotateApiKey`，舊金鑰會立刻失效。
 
-```bash
-npm i -g @google/clasp@2.4.2
-clasp login
-cp .clasp.json.example .clasp.json   # 填入 Apps Script 專案 ID（專案設定頁可以找到）
-clasp push -f
-```
+### 2. GitHub Pages（網頁）
 
-### 方法 C：GitHub Actions 自動部署
+repo 的 **Settings › Pages › Build and deployment** 設定：Source 選 `Deploy from a branch`，Branch 選 `main`、資料夾選 `/docs`，按 Save。約 1 分鐘後網址是 `https://torusmith.github.io/stock-glance/`。
 
-在 repo 的 **Settings › Secrets and variables › Actions** 新增下面幾個 secret，之後只要推送到 `main`，就會自動部署：
+第一次打開時，網頁會要求輸入 API 網址與金鑰，只需要設定一次（每台裝置各設定一次）。手機可以用「加入主畫面」。
 
-- `CLASPRC_JSON`：本機執行 `clasp login` 後，`~/.clasprc.json` 的完整內容
-- `SCRIPT_ID`：Apps Script 專案 ID
-- `DEPLOYMENT_ID`（選填）：網頁部署的 ID。設定後網址不會變，內容會自動更新
+### 3.（選用）GitHub Actions 自動更新 Apps Script
+
+在 **Settings › Secrets and variables › Actions** 新增：
+
+- `CLASPRC_JSON`：本機 `npm i -g @google/clasp@2.4.2 && clasp login` 後，`~/.clasprc.json` 的完整內容
+- `SCRIPT_ID`：Apps Script 專案 ID（專案設定頁）
+- `DEPLOYMENT_ID`：網頁部署的 ID（管理部署作業頁）
+
+設定好之後，`src/` 的變更推到 `main` 就會自動同步到 Apps Script，並更新同一個部署。網頁本身（`docs/`）則由 GitHub Pages 自動發布。
 
 ## 反彈訊號規則
 
@@ -92,5 +96,5 @@ node tests/harness.js        # 產生 tests/out/preview.html（價格是合成�
 
 - 證交所 MIS 報價延遲約數秒，Yahoo 資料延遲約 15～20 分鐘。Yahoo 用的是非官方介面，改版時可能需要調整 `Fetchers.gs`。
 - 證交所會限制查詢頻率，回補籌碼時每次請求之間會間隔 2 秒。
-- Apps Script 網頁第一次開啟需要 1～3 秒。之後資料會快取，再開會比較快。
+- Apps Script API 第一次呼叫需要 2～5 秒（要抓十幾個資料源）。之後有快取，會快很多。
 - 台指期夜盤、期貨未平倉沒有穩定的公開介面，目前只提供期交所連結。

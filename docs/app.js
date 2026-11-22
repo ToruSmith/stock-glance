@@ -1,4 +1,3 @@
-<script>
 {
 /* ============ 工具 ============ */
 const $ = (s, el = document) => el.querySelector(s);
@@ -23,12 +22,53 @@ const STATE_LABEL = { pos: '偏多', neu: '中性', neg: '偏空', na: '無資�
 const S = { data: null, tab: store.get('tab', 'overview'), sort: store.get('sort', 'weight'), chipKey: 'foreign',
   noteTag: '全部', timer: null, hist: {}, detail: null, loading: false };
 
+/* ============ API（Apps Script 網頁應用程式） ============ */
+// 預設的 API 網址；可在網頁右上角的齒輪修改
+const DEFAULT_API = 'https://script.google.com/macros/s/AKfycbyGY7ggEk3w_61F0tDFV0_r4-tW4aYml0GGgVem88-z6RwOUPVZ6DVtM50XLFTcn4kflw/exec';
+const CFG = { url: store.get('apiUrl', DEFAULT_API), key: store.get('apiKey', '') };
+const ROUTES = {
+  getDashboard: () => ({ api: 'dashboard' }),
+  getLive: () => ({ api: 'live' }),
+  getHistory: (id, range) => ({ api: 'history', id, range }),
+  refreshChips: () => ({ api: 'refreshChips' }),
+};
+
 function api(fn, ...args) {
   if (window.__MOCK__) return Promise.resolve().then(() => window.__MOCK__[fn](...args));
-  return new Promise((res, rej) => {
-    if (!window.google || !google.script) return rej(new Error('請從 Apps Script 部署網址開啟此頁'));
-    google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args);
-  });
+  if (!CFG.url || !CFG.key) return Promise.reject(Object.assign(new Error('尚未設定 API 金鑰'), { auth: true }));
+  const q = new URLSearchParams(Object.assign(ROUTES[fn](...args), { key: CFG.key, _: Date.now() }));
+  return fetch(CFG.url + '?' + q.toString(), { redirect: 'follow' })
+    .then(r => { if (!r.ok) throw new Error('API 回應 ' + r.status); return r.text(); })
+    .then(t => {
+      let j;
+      try { j = JSON.parse(t); } catch (e) { throw new Error('API 沒有回傳資料：請確認部署的存取權是「任何人」'); }
+      if (!j.ok) throw Object.assign(new Error(j.error === 'unauthorized' ? 'API 金鑰不正確' : j.error), { auth: j.error === 'unauthorized' });
+      return j.data;
+    });
+}
+
+function renderSetup(msg) {
+  if (!S.data) $('#mkt b').textContent = '未連線';
+  $$('.view').forEach(v => { v.hidden = v.dataset.view !== 'setup'; });
+  $('.tabs').hidden = true;
+  $('#v-setup').innerHTML = `
+  <article class="card" id="setup">
+    <h2>連線設定</h2>
+    <p class="sub">這個網頁的資料來自你的 Google Apps Script。金鑰只存在這台裝置的瀏覽器裡，不會出現在 GitHub 上。</p>
+    ${msg ? `<div class="banner">${esc(msg)}</div>` : ''}
+    <form id="setupForm" class="form">
+      <label>API 網址<input name="url" type="url" required value="${esc(CFG.url)}" autocomplete="off"></label>
+      <label>API 金鑰<input name="key" type="password" required value="${esc(CFG.key)}" autocomplete="off" placeholder="在 Apps Script 執行 showApiKey 取得"></label>
+      <div class="row"><button class="btn primary" type="submit">儲存並連線</button>
+        ${S.data ? '<button class="btn" type="button" id="btnSetupCancel">取消</button>' : ''}</div>
+    </form>
+    <p class="muted small">金鑰取得方式：在 Apps Script 編輯器選擇 <b>showApiKey</b> 並執行，再到「執行記錄」複製。</p>
+  </article>`;
+}
+
+function closeSetup() {
+  $('.tabs').hidden = false;
+  showTab(S.tab);
 }
 
 function toast(msg) {
@@ -467,9 +507,10 @@ function load(silent) {
   S.loading = true;
   $('#btnRefresh').classList.add('spin');
   api('getDashboard').then(d => {
-    S.data = d; renderAll(); showTab(S.tab); schedule();
+    S.data = d; $('.tabs').hidden = false; renderAll(); showTab(S.tab); schedule();
     if (silent !== true) toast('資料已更新');
   }).catch(e => {
+    if (e.auth) return renderSetup(CFG.key ? e.message : '');
     const b = $('#banner'); b.hidden = false; b.textContent = '載入失敗：' + (e.message || e);
   }).finally(() => { S.loading = false; $('#btnRefresh').classList.remove('spin'); });
 }
@@ -497,6 +538,8 @@ document.addEventListener('click', e => {
   if (t.hasAttribute('data-close')) return closeDetail();
   if (t.dataset.tab) return showTab(t.dataset.tab);
   if (t.id === 'btnRefresh') return load();
+  if (t.id === 'btnSettings') return renderSetup();
+  if (t.id === 'btnSetupCancel') return closeSetup();
   if (t.dataset.ind) return openDetail('ind', t.dataset.ind);
   if (t.dataset.code) return openDetail('hold', t.dataset.code);
   if (t.dataset.sort) { S.sort = t.dataset.sort; store.set('sort', S.sort); return renderHoldings(); }
@@ -524,12 +567,23 @@ document.addEventListener('change', e => {
   loadDetail();
 });
 
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'setupForm') return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  CFG.url = String(f.get('url')).trim(); CFG.key = String(f.get('key')).trim();
+  store.set('apiUrl', CFG.url); store.set('apiKey', CFG.key);
+  S.hist = {};
+  $('#v-setup').innerHTML = '<div class="skeleton"></div>';
+  load();
+});
+
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.detail) closeDetail(); });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && S.data && Date.now() - S.data.asOf > 5 * 60000) load(true);
 });
 
+if (S.tab === 'setup') S.tab = 'overview';
 showTab(S.tab);
 load(true);
 }
-</script>

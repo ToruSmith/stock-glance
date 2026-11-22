@@ -1,5 +1,5 @@
-<style>
 /*
+Stock Glance 樣式
 VOICE  冷靜、精準，像券商研究部的盤後簡報；數字優先，不賣弄。
 IDEA   一張可以帶著走的「看盤單」：上方是訊號儀表，下方是指標卡與持股帳本。
 PICTURE 七格反彈訊號儀表 + 每張卡片的 60 日走勢線；細看時展開成完整走勢圖。
@@ -219,4 +219,7 @@ th{font-weight:500;color:var(--muted);font-size:12.5px}
   .stack td:first-child{grid-column:1/-1;font-weight:700}
   .stack td:first-child::before{display:none}
 }
-</style>
+.form{display:grid;gap:12px;margin:4px 0 12px}
+.form label{display:grid;gap:6px;font-size:13px;color:var(--muted)}
+.form input{font:16px var(--num);padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--ink);min-height:44px;width:100%}
+.form input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}

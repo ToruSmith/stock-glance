@@ -134,13 +134,15 @@ function sheetStub(name) {
     getRange: (r, c, nr, nc) => rng(r, c, nr || 1, nc || 1), setFrozenRows: () => {} };
 }
 const cache = new Map();
+const props = {};
 const resp = ([code, body]) => ({ getResponseCode: () => code, getContentText: () => body });
 const ctx = {
   console, Date, Math, JSON, Number, String, Object, Array, isFinite, encodeURIComponent, decodeURIComponent,
-  Utilities: { formatDate: fmtDate, sleep: () => {}, DigestAlgorithm: { MD5: 'md5' },
+  Utilities: { getUuid: () => crypto.randomUUID(), formatDate: fmtDate, sleep: () => {}, DigestAlgorithm: { MD5: 'md5' },
     computeDigest: (a, s) => Array.from(crypto.createHash('md5').update(s).digest()), base64EncodeWebSafe: b => Buffer.from(b).toString('base64url') },
   CacheService: { getScriptCache: () => ({ get: k => cache.get(k) || null, put: (k, v) => cache.set(k, v) }) },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; } }) },
+  ContentService: { MimeType: { JSON: 'json' }, createTextOutput: t => ({ text: t, setMimeType() { return this; } }) },
   UrlFetchApp: { fetch: u => resp(route(u)), fetchAll: rs => rs.map(r => resp(route(r.url))) },
   SpreadsheetApp: { openById: () => ({ getSheetByName: n => (sheets[n] ? sheetStub(n) : null) }) },
   Logger: { log: console.log },
@@ -155,6 +157,11 @@ console.log('backfill 交易日:', got, '籌碼列數:', sheets['籌碼'].length
 const dash = vm.runInContext('getDashboard()', ctx);
 const live = vm.runInContext('getLive()', ctx);
 const hist = vm.runInContext('getHistory("00918","1y")', ctx);
+const key = vm.runInContext('setupApiKey()', ctx);
+const call = q => JSON.parse(vm.runInContext('doGet(' + JSON.stringify({ parameter: q }) + ').text', ctx));
+console.log('API 無金鑰:', call({ api: 'dashboard' }).error, '| 錯金鑰:', call({ api: 'dashboard', key: 'x' }).error,
+  '| 正確:', call({ api: 'dashboard', key }).ok, '| history:', call({ api: 'history', id: 'SOX', range: '1mo', key }).data.points.length,
+  '| 無 api:', call({}).name);
 Date.now = RealNow;
 
 console.log('訊號:', dash.signals.items.map(i => i.key + '=' + i.state).join(' '), '|', dash.signals.summary);
@@ -164,8 +171,9 @@ console.log('00918 近12月配息:', hist.ttmDiv);
 console.log('錯誤:', dash.errors);
 fs.writeFileSync(path.join(OUT, 'dashboard.json'), JSON.stringify(dash, null, 1));
 
-/* ---------- 組預覽頁 ---------- */
-const read = f => fs.readFileSync(path.join(SRC, f), 'utf8');
+/* ---------- 組預覽頁（GitHub Pages 前端 + 假 API） ---------- */
+const DOCS = path.join(ROOT, 'docs');
+const read = f => fs.readFileSync(path.join(DOCS, f), 'utf8');
 const mock = `<script>
 window.__MOCK__ = (function(){
   const dash = ${JSON.stringify(dash)};
@@ -179,8 +187,8 @@ window.__MOCK__ = (function(){
   };
 })();
 </script>`;
-let html = read('index.html')
-  .replace("<?!= include('Styles'); ?>", () => read('Styles.html'))
-  .replace("<?!= include('App'); ?>", () => mock + read('App.html'));
+const html = read('index.html')
+  .replace('<link rel="stylesheet" href="styles.css">', () => '<style>' + read('styles.css') + '</style>')
+  .replace('<script src="app.js"></script>', () => mock + '<script>' + read('app.js') + '</script>');
 fs.writeFileSync(path.join(OUT, 'preview.html'), html);
 console.log('預覽頁:', path.join(OUT, 'preview.html'));
