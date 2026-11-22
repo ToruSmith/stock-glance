@@ -231,6 +231,7 @@ window.__MOCK__ = (function(){
 </script>`;
 const html = read('index.html')
   .replace('<link rel="stylesheet" href="styles.css">', () => '<style>' + read('styles.css') + '</style>')
+  .replace('<script src="glossary.js"></script>', () => '<script>' + read('glossary.js') + '</script>')
   .replace('<script src="app.js"></script>', () => mock + '<script>' + read('app.js') + '</script>');
 fs.writeFileSync(path.join(OUT, 'preview.html'), html);
 console.log('預覽頁:', path.join(OUT, 'preview.html'));

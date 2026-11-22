@@ -18,6 +18,25 @@ const store = { get(k, d) { try { return JSON.parse(localStorage.getItem('sg:' +
   set(k, v) { try { localStorage.setItem('sg:' + k, JSON.stringify(v)); } catch (e) {} } };
 const PALETTE = ['#1d3fd8', '#0e9aa7', '#d4a017', '#7b4dd6', '#64748b', '#e07a5f', '#2f855a', '#b83280'];
 const STATE_LABEL = { pos: '偏多', neu: '中性', neg: '偏空', na: '無資料' };
+const GL = window.GLOSSARY || {};
+/** 名詞說明的小問號；k 為 glossary.js 的 key */
+const gi = k => GL[k] ? `<span class="gi" data-gl="${k}" role="button" tabindex="0" aria-label="${esc(GL[k].title)} 說明">?</span>` : '';
+const SIG_GL = { SOX: 'SOX', VIX: 'VIX', SPX: 'SPX', TWD: 'USDTWD', TAIEX: 'MA', FOREIGN: 'FOREIGN', MARGIN: 'MARGIN' };
+
+function openGlossary(k) {
+  const g = GL[k]; if (!g) return;
+  $('#glossBody').innerHTML = `
+    <h2 id="glossTitle">${esc(g.title)}</h2>
+    <dl class="gloss-dl">
+      <dt>這是什麼</dt><dd>${esc(g.what)}</dd>
+      <dt>為什麼重要</dt><dd>${esc(g.why)}</dd>
+      <dt>怎麼看</dt><dd>${esc(g.read)}</dd>
+    </dl>
+    ${g.link ? `<a class="btn wide" href="${esc(g.link[1])}" target="_blank" rel="noopener">延伸閱讀：${esc(g.link[0])} ↗</a>` : ''}`;
+  $('#gloss').hidden = false;
+  $('.gloss-card .sheet-x').focus();
+}
+function closeGlossary() { $('#gloss').hidden = true; }
 
 const S = { data: null, tab: store.get('tab', 'overview'), sort: store.get('sort', 'weight'), chipKey: 'foreign',
   noteTag: '全部', timer: null, hist: {}, detail: null, loading: false };
@@ -237,7 +256,7 @@ function renderOverview() {
   <article class="card" id="signals">
     <div class="gauge-head">
       <div>
-        <div class="muted small">反彈訊號儀表</div>
+        <div class="muted small">反彈訊號儀表 ${gi('SIGNAL')}</div>
         <div class="gauge-score num">${sg.pos}<small>/ ${sg.items.length} 偏多</small></div>
       </div>
       <div class="gauge-legend">
@@ -252,7 +271,7 @@ function renderOverview() {
     <ul class="sig-list">
       ${sg.items.map(s => `<li><details>
         <summary><span class="dot ${s.state}"></span>
-          <span><span class="sig-name">${esc(s.name)}</span><span class="sig-val num">${esc(s.value)}</span></span>
+          <span><span class="sig-name">${esc(s.name)} ${gi(SIG_GL[s.key])}</span><span class="sig-val num">${esc(s.value)}</span></span>
           <span class="tag ${s.state}">${STATE_LABEL[s.state]}</span></summary>
         <p class="rule">${esc(s.rule)}</p></details></li>`).join('')}
     </ul>
@@ -264,7 +283,7 @@ function renderOverview() {
     let hint = '';
     if (ind.badWhenUp && ok(ind.chg) && Math.abs(ind.chg) > 0) hint = `<div class="hint ${ind.chg > 0 ? 'down' : 'up'}">${ind.chg > 0 ? '對台股偏不利' : '對台股偏有利'}</div>`;
     return `<button class="tile" data-ind="${esc(ind.key)}" id="ind-${esc(ind.key)}">
-      <div class="t-name"><span>${esc(ind.name)}</span><span class="small">${esc(ind.group)}</span></div>
+      <div class="t-name"><span>${esc(ind.name)} ${gi(ind.key)}</span><span class="small">${esc(ind.group)}</span></div>
       <div class="t-price num">${fmt(ind.price, ind.digits)}</div>
       <div class="t-chg num ${cls(ind.chg)}">${sgn(ind.chg, ind.digits)}　${sgn(ind.chgPct, 2)}%</div>
       ${hint}
@@ -273,7 +292,7 @@ function renderOverview() {
   }).join('');
 
   $('#v-overview').innerHTML = `${sigHtml}
-    <div class="sec-title"><h3>市場指標</h3><span class="muted small">近 60 個交易日　點卡片看走勢</span></div>
+    <div class="sec-title"><h3>市場指標</h3><span class="muted small">點 ? 看說明，點卡片看走勢</span></div>
     <div class="grid2 wide">${tiles}</div>`;
 }
 
@@ -293,13 +312,14 @@ function renderHoldings() {
     <div class="muted small">總市值（新台幣）</div>
     <div class="kv"><div class="v big num">${money(t.value)}</div></div>
     <div class="sum-grid">
-      <div class="kv"><div class="k">未實現損益</div><div class="v num ${cls(t.pnl)}">${sMoney(t.pnl)}<small>${sgn(t.pnlPct)}%</small></div></div>
-      <div class="kv"><div class="k">今日損益</div><div class="v num ${cls(t.dayPnl)}">${sMoney(t.dayPnl)}<small>${sgn(t.dayPct)}%</small></div></div>
+      <div class="kv"><div class="k">未實現損益 ${gi('UNREAL')}</div><div class="v num ${cls(t.pnl)}">${sMoney(t.pnl)}<small>${sgn(t.pnlPct)}%</small></div></div>
+      <div class="kv"><div class="k">今日損益 ${gi('DAY')}</div><div class="v num ${cls(t.dayPnl)}">${sMoney(t.dayPnl)}<small>${sgn(t.dayPct)}%</small></div></div>
       <div class="kv"><div class="k">投入成本</div><div class="v num">${money(t.cost)}</div></div>
-      <div class="kv"><div class="k">若今天全部賣出（扣費稅）</div><div class="v num ${cls(t.netPnl)}">${sMoney(t.netPnl)}</div></div>
-      ${h.ledger ? `<div class="kv"><div class="k">已實現損益（累計）</div><div class="v num ${cls(t.realized)}">${sMoney(t.realized)}</div></div>` : ''}
+      <div class="kv"><div class="k">若今天全部賣出（扣費稅） ${gi('NET')}</div><div class="v num ${cls(t.netPnl)}">${sMoney(t.netPnl)}</div></div>
+      ${h.ledger ? `<div class="kv"><div class="k">已實現損益（累計） ${gi('REAL')}</div><div class="v num ${cls(t.realized)}">${sMoney(t.realized)}</div></div>` : ''}
     </div>
-    <div class="alloc" role="img" aria-label="持股比重">${h.rows.map(r => `<span style="width:${(r.weight || 0).toFixed(2)}%;background:${colorOf(r.code)}" title="${esc(r.name)} ${fmt(r.weight, 1)}%"></span>`).join('')}</div>
+    <div class="muted small" style="margin-top:16px">持股比重 ${gi('WEIGHT')}</div>
+    <div class="alloc" style="margin-top:6px" role="img" aria-label="持股比重">${h.rows.map(r => `<span style="width:${(r.weight || 0).toFixed(2)}%;background:${colorOf(r.code)}" title="${esc(r.name)} ${fmt(r.weight, 1)}%"></span>`).join('')}</div>
     <div class="alloc-legend">${h.rows.slice().sort((a, b) => b.weight - a.weight).map(r => `<span><i style="background:${colorOf(r.code)}"></i>${esc(r.code)} <span class="num">${fmt(r.weight, 1)}%</span></span>`).join('')}</div>
     ${missing}
   </article>
@@ -320,7 +340,7 @@ function renderHoldings() {
   ${h.closed && h.closed.length ? `<details class="card closed"><summary><b>已出清</b> <span class="muted small">${h.closed.length} 檔</span></summary>
     <ul class="txlist">${h.closed.map(c => `<li><span>${esc(c.name)} <span class="muted num">${esc(c.code)}</span></span><span class="num ${cls(c.realized)}">${sMoney(c.realized)}</span></li>`).join('')}</ul></details>` : ''}
   <div class="row" style="justify-content:space-between;padding:4px">
-    <span class="muted small">手續費折扣 ${esc(S.data.settings.feeDiscount)}，ETF 交易稅 0.1%，平均成本法</span>
+    <span class="muted small">手續費折扣 ${esc(S.data.settings.feeDiscount)} ${gi('FEE')}　平均成本法 ${gi('AVGCOST')}</span>
     <a class="btn" href="${esc(S.data.sheetUrl)}" target="_blank" rel="noopener">在 Google Sheet 查看紀錄</a>
   </div>`;
 }
@@ -345,20 +365,20 @@ function renderChips() {
   <article class="card" id="chips-latest">
     <div class="row" style="justify-content:space-between"><h2>${esc(L.date)} 盤後籌碼</h2><span class="muted small">單位：億元</span></div>
     <div class="chip-now" style="margin-top:10px">
-      ${keys.slice(0, 3).map(([k, l]) => `<div class="kv"><div class="k">${l}</div><div class="v num ${cls(L[k])}">${sgn(L[k], 1)}</div></div>`).join('')}
+      ${keys.slice(0, 3).map(([k, l]) => `<div class="kv"><div class="k">${l} ${gi('FOREIGN')}</div><div class="v num ${cls(L[k])}">${sgn(L[k], 1)}</div></div>`).join('')}
       <div class="kv"><div class="k">三大法人合計</div><div class="v num ${cls(L.total)}">${sgn(L.total, 1)}</div></div>
-      <div class="kv"><div class="k">融資餘額</div><div class="v num">${fmt(L.margin, 0)}</div></div>
+      <div class="kv"><div class="k">融資餘額 ${gi('MARGIN')}</div><div class="v num">${fmt(L.margin, 0)}</div></div>
       <div class="kv"><div class="k">融資增減</div><div class="v num ${cls(L.marginChg)}">${sgn(L.marginChg, 1)}</div></div>
     </div>
   </article>
   <article class="card" id="chips-flow">
-    <div class="row" style="justify-content:space-between"><h2>法人買賣超</h2>
+    <div class="row" style="justify-content:space-between"><h2>法人買賣超 ${gi('FOREIGN')}</h2>
       <div class="seg-ctl" role="group" aria-label="法人">${keys.map(([k, l]) => `<button data-chip="${k}" aria-pressed="${S.chipKey === k}">${l}</button>`).join('')}</div></div>
     <p class="sub">近 ${recent.length} 個交易日，紅色為買超、綠色為賣超</p>
     <div class="fig" id="figFlow"></div>
   </article>
   <article class="card" id="chips-margin">
-    <h2>融資餘額</h2><p class="sub">散戶槓桿水位：急降代表斷頭清洗，急升代表追價或攤平</p>
+    <h2>融資餘額 ${gi('MARGIN')}</h2><p class="sub">散戶槓桿水位：急降代表斷頭清洗，急升代表追價或攤平</p>
     <div class="fig" id="figMargin"></div>
   </article>
   <article class="card" id="chips-table">
@@ -403,6 +423,8 @@ function renderNotes() {
   ${shown.length ? shown.map((n, i) => `<article class="card note" id="note-${i}">
     <div class="meta"><span class="tag">${esc(n.tag)}</span><span class="num">${esc(n.date)}</span></div>
     <h4>${esc(n.title)}</h4><p>${esc(n.body)}</p></article>`).join('') : '<div class="empty">這個分類還沒有筆記</div>'}
+  <article class="card" id="glossary"><h2>名詞小辭典</h2><p class="sub">看不懂的名詞點這裡，也可以點頁面上任何一個 ? 圖示</p>
+    <div class="gl-list">${Object.keys(GL).map(k => `<button class="chip" data-gl="${k}">${esc(GL[k].title)}</button>`).join('')}</div></article>
   <article class="card" id="links"><h2>常用資料連結</h2>
     <ul class="links">${groups.map(g => `<li class="grp">${esc(g)}</li>` + S.data.links.filter(l => l.group === g)
       .map(l => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a></li>`).join('')).join('')}</ul></article>
@@ -441,13 +463,13 @@ function renderDetail() {
   if (D.kind === 'hold') toggles.push(['cost', '成本線', '#1d3fd8']);
   $('#sheetBody').innerHTML = `
     <div class="d-head">
-      <div class="d-name">${esc(it.name)} <span class="muted num" style="font-size:14px;font-weight:500">${esc(D.kind === 'hold' ? it.code : it.symbol)}</span></div>
+      <div class="d-name">${esc(it.name)} <span class="muted num" style="font-size:14px;font-weight:500">${esc(D.kind === 'hold' ? it.code : it.symbol)}</span> ${D.kind === 'ind' ? gi(it.key) : ''}</div>
       <div class="d-price num">${fmt(it.price, digits)}</div>
       <div class="num ${cls(it.chg)}">${sgn(it.chg, digits)}（${sgn(it.chgPct)}%）<span class="muted small">　${esc(D.kind === 'hold' ? it.quoteSource : it.source)} ${hhmm(D.kind === 'hold' ? it.quoteTime : it.time)}</span></div>
     </div>
     ${D.kind === 'hold' && S.data.holdings.ledger ? `<div class="row act-row"><button class="btn" data-txopen="buy" data-txcode="${esc(it.code)}">加碼買進</button><button class="btn" data-txopen="sell" data-txcode="${esc(it.code)}">賣出</button></div>` : ''}
     <div class="ranges" role="group" aria-label="期間">${RANGES.map(r => `<button data-range="${r[0]}" aria-pressed="${D.range === r[0]}">${r[1]}</button>`).join('')}</div>
-    <div class="toggles">${toggles.map(([k, l, c]) => `<label><input type="checkbox" data-opt="${k}" ${D.opts[k] ? 'checked' : ''}><i style="background:${c}"></i>${l}</label>`).join('')}</div>
+    <div class="toggles">${gi('MA')}${toggles.map(([k, l, c]) => `<label><input type="checkbox" data-opt="${k}" ${D.opts[k] ? 'checked' : ''}><i style="background:${c}"></i>${l}</label>`).join('')}</div>
     <div class="fig tall" id="figDetail"><div class="loading">載入走勢中…</div></div>
     <div class="stats" id="dStats"></div>
     ${D.kind === 'hold' && it.txs ? `<div class="sec-title" style="margin:16px 4px 6px"><h3>交易明細</h3><span class="muted small">${it.txs.length} 筆</span></div>
@@ -494,20 +516,20 @@ function drawDetail(h) {
   const fromHi = (last / hi - 1) * 100, fromLo = (last / lo - 1) * 100;
   const rangeRet = (last / vc[0] - 1) * 100;
   const L = i => ma[i][ma[i].length - 1];
-  const cell = (k, v, c = '') => `<div><div class="k">${k}</div><div class="v num ${c}">${v}</div></div>`;
-  let s = cell('區間報酬', sgn(rangeRet) + '%', cls(rangeRet)) + cell('區間最高', fmt(hi, digits)) + cell('區間最低', fmt(lo, digits)) +
-    cell('距區間高點', sgn(fromHi) + '%', cls(fromHi)) + cell('距區間低點', sgn(fromLo) + '%', cls(fromLo));
+  const cell = (k, v, c = '', g = '') => `<div><div class="k">${k} ${g ? gi(g) : ''}</div><div class="v num ${c}">${v}</div></div>`;
+  let s = cell('區間報酬', sgn(rangeRet) + '%', cls(rangeRet), 'DRAWDOWN') + cell('區間最高', fmt(hi, digits)) + cell('區間最低', fmt(lo, digits)) +
+    cell('距區間高點', sgn(fromHi) + '%', cls(fromHi), 'DRAWDOWN') + cell('距區間低點', sgn(fromLo) + '%', cls(fromLo));
   if (D.kind === 'hold') {
     const yieldPct = ok(h.ttmDiv) && h.ttmDiv > 0 && ok(last) ? h.ttmDiv / last * 100 : null;
-    s = cell('持有股數', money(it.shares)) + cell('平均成本', fmt(it.avg, 2)) + cell('損益兩平價', fmt(it.breakeven, 2)) +
-      cell('市值', money(it.value)) + cell('未實現損益', sMoney(it.pnl) + '（' + sgn(it.pnlPct) + '%）', cls(it.pnl)) +
-      cell('賣出淨損益', sMoney(it.netPnl), cls(it.netPnl)) + cell('今日損益', sMoney(it.dayPnl), cls(it.dayPnl)) +
-      cell('占投資組合', fmt(it.weight, 1) + '%') +
-      cell('近 12 月配息', ok(h.ttmDiv) && h.ttmDiv > 0 ? fmt(h.ttmDiv, 2) + ' 元' : '—') +
-      cell('估算殖利率', ok(yieldPct) ? fmt(yieldPct, 2) + '%' : '—') + s;
-    s += `<div style="grid-column:1/-1"><div class="k">賣出成本估算</div><div class="v small" style="font-weight:500">手續費 ${money(it.sellFee)} 元＋交易稅 ${money(it.sellTax)} 元；兩平價已含這兩項</div></div>`;
+    s = cell('持有股數', money(it.shares), '', 'ODD') + cell('平均成本', fmt(it.avg, 2), '', 'AVGCOST') + cell('損益兩平價', fmt(it.breakeven, 2), '', 'BREAKEVEN') +
+      cell('市值', money(it.value)) + cell('未實現損益', sMoney(it.pnl) + '（' + sgn(it.pnlPct) + '%）', cls(it.pnl), 'UNREAL') +
+      cell('賣出淨損益', sMoney(it.netPnl), cls(it.netPnl), 'NET') + cell('今日損益', sMoney(it.dayPnl), cls(it.dayPnl), 'DAY') +
+      cell('占投資組合', fmt(it.weight, 1) + '%', '', 'WEIGHT') +
+      cell('近 12 月配息', ok(h.ttmDiv) && h.ttmDiv > 0 ? fmt(h.ttmDiv, 2) + ' 元' : '—', '', 'YIELD') +
+      cell('估算殖利率', ok(yieldPct) ? fmt(yieldPct, 2) + '%' : '—', '', 'YIELD') + s;
+    s += `<div style="grid-column:1/-1"><div class="k">賣出成本估算 ${gi('FEE')}</div><div class="v small" style="font-weight:500">手續費 ${money(it.sellFee)} 元＋交易稅 ${money(it.sellTax)} 元；兩平價已含這兩項</div></div>`;
   } else {
-    s += cell('5 日線', fmt(L('ma5'), digits)) + cell('20 日線', fmt(L('ma20'), digits)) + cell('60 日線', fmt(L('ma60'), digits)) +
+    s += cell('5 日線', fmt(L('ma5'), digits), '', 'MA') + cell('20 日線', fmt(L('ma20'), digits), '', 'MA') + cell('60 日線', fmt(L('ma60'), digits), '', 'MA') +
       cell('52 週高', fmt(it.high52, digits)) + cell('52 週低', fmt(it.low52, digits));
   }
   s += `<div style="grid-column:1/-1"><div class="k">資料來源</div><div class="v small" style="font-weight:500">${esc(h.source)}${h.interval === '1wk' ? '（週線）' : '（日線）'}</div></div>`;
@@ -563,7 +585,7 @@ function renderTxForm() {
   const T = S.tx, p = T.pick, held = p ? heldOf(p[0]) : null;
   const sellable = S.data.holdings.rows.length > 0;
   $('#sheetBody').innerHTML = `
-  <div class="d-head"><div class="d-name">新增交易</div><div class="muted small">平均成本法；手續費依設定的折扣自動計算，可以手動修改</div></div>
+  <div class="d-head"><div class="d-name">新增交易</div><div class="muted small">平均成本法 ${gi('AVGCOST')}；手續費依設定的折扣自動計算，可以手動修改 ${gi('FEE')}</div></div>
   <div class="ranges side" role="group" aria-label="買賣">
     <button type="button" data-side="buy" aria-pressed="${T.side === 'buy'}">買進</button>
     <button type="button" data-side="sell" aria-pressed="${T.side === 'sell'}" ${sellable ? '' : 'disabled'}>賣出</button>
@@ -708,6 +730,9 @@ function schedule() {
 
 /* ============ 事件 ============ */
 document.addEventListener('click', e => {
+  const g = e.target.closest('[data-gl]');
+  if (g) { e.preventDefault(); e.stopPropagation(); return openGlossary(g.dataset.gl); }
+  if (e.target.closest('[data-gclose]')) return closeGlossary();
   const t = e.target.closest('button,[data-close]');
   if (!t) return;
   if (t.hasAttribute('data-close')) return closeDetail();
@@ -772,7 +797,10 @@ document.addEventListener('submit', e => {
   load();
 });
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.detail) closeDetail(); });
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset && e.target.dataset.gl && e.target.tagName === 'SPAN') { e.preventDefault(); return openGlossary(e.target.dataset.gl); }
+  if (e.key === 'Escape') { if (!$('#gloss').hidden) return closeGlossary(); if (S.detail || S.tx) closeDetail(); }
+});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && S.data && Date.now() - S.data.asOf > 5 * 60000) load(true);
 });

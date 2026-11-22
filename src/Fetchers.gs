@@ -222,7 +222,8 @@ function twseInstitutional_(yyyymmdd) {
   j.data.forEach(row => {
     const name = String(row[0]);
     const diff = num_(row[3]) || 0;
-    if (name.indexOf('外資') === 0 || name.indexOf('外資及陸資') >= 0) foreign += diff;
+    if (name.trim().indexOf('外資自營商') === 0) return; // 「外資自營商」列已含在自營商內，也不計入合計
+    if (name.indexOf('外資及陸資') >= 0 || name.indexOf('外資') === 0) foreign += diff;
     else if (name.indexOf('投信') >= 0) trust += diff;
     else if (name.indexOf('自營商') >= 0) dealer += diff;
     else if (name.indexOf('合計') >= 0) total = diff;

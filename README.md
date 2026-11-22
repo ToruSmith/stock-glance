@@ -27,6 +27,7 @@ GitHub 上只有程式碼，沒有任何持股資料。API 金鑰存在 Apps Scr
 | 檔案 | 用途 |
 | --- | --- |
 | `docs/index.html` `styles.css` `app.js` | 網頁（GitHub Pages）。不依賴任何外部 JS 套件，圖表為自繪 SVG |
+| `docs/glossary.js` | 名詞小辭典：網頁上每個「?」的白話說明與延伸閱讀連結 |
 | `src/Code.gs` | `doGet` JSON API、損益計算 |
 | `src/Fetchers.gs` | 所有對外抓資料的程式與快取 |
 | `src/Signals.gs` | 反彈訊號的判斷規則 |
