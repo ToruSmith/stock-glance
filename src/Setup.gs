@@ -6,6 +6,7 @@
 function setup() {
   setupApiKey();
   ensureSheets_();
+  migrateHoldingsToLedger_();
   installTriggers();
   const n = backfillChips(25);
   Logger.log('完成：已建立排程，補齊 ' + n + ' 個交易日的籌碼資料。');
@@ -37,6 +38,7 @@ function rotateApiKey() {
 function ensureSheets_() {
   const ss = ss_();
   const need = [
+    [CONFIG.SHEETS.LEDGER, TX_HEAD],
     [CONFIG.SHEETS.HOLDINGS, ['代號', '名稱', '股數', '成交均價', '投入成本', '類型', '市場', '備註']],
     [CONFIG.SHEETS.CHIPS, ['日期', '外資(億)', '投信(億)', '自營商(億)', '三大法人合計(億)', '融資餘額(億)', '融資增減(億)', '更新時間']],
     [CONFIG.SHEETS.NOTES, ['日期', '分類', '標題', '內容']],
@@ -51,6 +53,23 @@ function ensureSheets_() {
       sh.getRange('A:A').setNumberFormat('@');
     }
   });
+}
+
+/** 交易紀錄是空的、但持股分頁有資料時，把持股轉成「期初庫存」交易 */
+function migrateHoldingsToLedger_() {
+  const sh = ledgerSheet_();
+  if (!sh || sh.getLastRow() > 1) return 0;
+  const rows = readHoldingsSheet_().map(h => {
+    const amount = h.avg * h.shares;
+    const fee = Math.max(0, Math.round(h.cost - amount));
+    return ['', h.code, h.name, '買進', h.shares, h.avg, fee, 0, -Math.round(h.cost), h.type,
+      h.market === 'otc' ? '上櫃' : '上市', '期初庫存（由持股表轉入）', 'init-' + h.code];
+  });
+  if (!rows.length) return 0;
+  sh.getRange(2, 1, rows.length, 2).setNumberFormat('@');
+  sh.getRange(2, 13, rows.length, 1).setNumberFormat('@');
+  sh.getRange(2, 1, rows.length, TX_HEAD.length).setValues(rows);
+  return rows.length;
 }
 
 /** 每個交易日晚上自動抓籌碼（證交所融資資料約 21:00 後公布） */

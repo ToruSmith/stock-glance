@@ -7,6 +7,7 @@ const CONFIG = {
   TZ: 'Asia/Taipei',
 
   SHEETS: {
+    LEDGER: '交易紀錄',
     HOLDINGS: '持股',
     CHIPS: '籌碼',
     NOTES: '觀察筆記',
@@ -35,6 +36,7 @@ const CONFIG = {
   DEFAULTS: {
     '手續費折扣': 1,
     '最低手續費': 20,
+    '零股最低手續費': 1,
     '自動刷新秒數': 60,
     '融資警戒增幅': 3,
     '外資大賣門檻(億)': 300,

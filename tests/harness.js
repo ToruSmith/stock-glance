@@ -103,6 +103,13 @@ function route(url) {
       data: [['融資(交易單位)', '1', '1', '1', '1', '1'], ['融券(交易單位)', '1', '1', '1', '1', '1'],
         ['融資金額(仟元)', '1', '1', '1', Math.round(c.margin + 3e6).toLocaleString('en-US'), Math.round(c.margin).toLocaleString('en-US')]] }, { title: '其他', data: [] }] })];
   }
+  if (url.indexOf('openapi.twse.com.tw') >= 0) {
+    const rows = [['0050', '元大台灣50'], ['0056', '元大高股息'], ['00878', '國泰永續高股息'], ['00918', '大華優利高填息30'], ['00919', '群益台灣精選高息'],
+      ['00929', '復華台灣科技優息'], ['009816', '凱基台灣TOP50'], ['00985A', '主動野村台灣50'], ['2330', '台積電'], ['2317', '鴻海'], ['2454', '聯發科']];
+    for (let i = 0; i < 600; i++) rows.push([String(1101 + i), '測試股' + i]);
+    return [200, JSON.stringify(rows.map(([Code, Name]) => ({ Code, Name, ClosingPrice: Y[Code + '.TW'] ? Y[Code + '.TW'].slice(-1)[0].c.toFixed(2) : '50.00' })))];
+  }
+  if (url.indexOf('tpex.org.tw') >= 0) return [200, JSON.stringify([{ SecuritiesCompanyCode: '6488', CompanyName: '環球晶', Close: '400.00' }, { SecuritiesCompanyCode: '700001', CompanyName: '權證', Close: '1' }])];
   return [404, ''];
 }
 
@@ -114,6 +121,13 @@ function fmtDate(d, tz, p) {
   return p.replace('yyyy', parts.year).replace('MM', parts.month).replace('dd', parts.day).replace('HH', parts.hour).replace('mm', parts.minute).replace('ss', parts.second).replace(/^u$/, String(u));
 }
 const sheets = {
+  '交易紀錄': [['日期', '代號', '名稱', '動作', '股數', '成交價', '手續費', '交易稅', '淨收付', '類型', '市場', '備註', 'ID'],
+    ['', '0050', '元大台灣50', '買進', 1000, 111.5, 167, 0, -111667, 'ETF', '上市', '期初庫存', 'init-0050'],
+    ['', '00918', '大華優利高填息30', '買進', 1000, 34.07, 48, 0, -34118, 'ETF', '上市', '期初庫存', 'init-00918'],
+    ['', '00919', '群益台灣精選高息', '買進', 1000, 32.04, 45, 0, -32085, 'ETF', '上市', '期初庫存', 'init-00919'],
+    ['', '00929', '復華台灣科技優息', '買進', 1000, 28.51, 40, 0, -28550, 'ETF', '上市', '期初庫存', 'init-00929'],
+    ['', '009816', '凱基台灣TOP50', '買進', 1000, 16.46, 23, 0, -16483, 'ETF', '上市', '期初庫存', 'init-009816'],
+    ['', '00985A', '主動野村台灣50', '買進', 1000, 24.31, 34, 0, -24344, 'ETF', '上市', '期初庫存', 'init-00985A']],
   '持股': [['代號', '名稱', '股數', '成交均價', '投入成本', '類型', '市場', '備註'],
     ['0050', '元大台灣50', 1000, 111.5, 111667, 'ETF', '上市', '市值型'], ['00918', '大華優利高填息30', 1000, 34.07, 34118, 'ETF', '上市', '高股息'],
     ['00919', '群益台灣精選高息', 1000, 32.04, 32085, 'ETF', '上市', '高股息'], ['00929', '復華台灣科技優息', 1000, 28.51, 28550, 'ETF', '上市', '科技高息・月配'],
@@ -129,9 +143,11 @@ function sheetStub(name) {
     setValues: v => { v.forEach((row, i) => { data[r - 1 + i] = data[r - 1 + i] || []; row.forEach((x, j) => { data[r - 1 + i][c - 1 + j] = x; }); }); return this; },
     sort: col => { const body = data.slice(r - 1, r - 1 + nr).sort((a, b) => String(a[col - 1]) < String(b[col - 1]) ? -1 : 1); data.splice(r - 1, nr, ...body); },
     setFontWeight: () => ({}), setNumberFormat: () => ({}),
+    clearContent: () => { for (let i = r - 1; i < r - 1 + nr; i++) if (data[i]) for (let j = c - 1; j < c - 1 + nc; j++) data[i][j] = ''; },
   });
   return { getDataRange: () => rng(1, 1, data.length, Math.max(...data.map(r => r.length))), getLastRow: () => data.length,
-    getRange: (r, c, nr, nc) => rng(r, c, nr || 1, nc || 1), setFrozenRows: () => {} };
+    getRange: (r, c, nr, nc) => rng(r, c, nr || 1, nc || 1), setFrozenRows: () => {},
+    deleteRow: r => { data.splice(r - 1, 1); } };
 }
 const cache = new Map();
 const props = {};
@@ -140,21 +156,45 @@ const ctx = {
   console, Date, Math, JSON, Number, String, Object, Array, isFinite, encodeURIComponent, decodeURIComponent,
   Utilities: { getUuid: () => crypto.randomUUID(), formatDate: fmtDate, sleep: () => {}, DigestAlgorithm: { MD5: 'md5' },
     computeDigest: (a, s) => Array.from(crypto.createHash('md5').update(s).digest()), base64EncodeWebSafe: b => Buffer.from(b).toString('base64url') },
-  CacheService: { getScriptCache: () => ({ get: k => cache.get(k) || null, put: (k, v) => cache.set(k, v) }) },
+  CacheService: { getScriptCache: () => ({ get: k => cache.get(k) || null, put: (k, v) => cache.set(k, v),
+    getAll: ks => Object.fromEntries(ks.map(k => [k, cache.get(k)])), putAll: m => Object.entries(m).forEach(([k, v]) => cache.set(k, v)) }) },
+  LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
   PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; } }) },
   ContentService: { MimeType: { JSON: 'json' }, createTextOutput: t => ({ text: t, setMimeType() { return this; } }) },
   UrlFetchApp: { fetch: u => resp(route(u)), fetchAll: rs => rs.map(r => resp(route(r.url))) },
-  SpreadsheetApp: { openById: () => ({ getSheetByName: n => (sheets[n] ? sheetStub(n) : null) }) },
+  SpreadsheetApp: { flush() {}, openById: () => ({ getSheetByName: n => (sheets[n] ? sheetStub(n) : null) }) },
   Logger: { log: console.log },
 };
 vm.createContext(ctx);
-['Config.gs', 'Fetchers.gs', 'Signals.gs', 'Code.gs', 'Setup.gs'].forEach(f => vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), ctx, { filename: f }));
+['Config.gs', 'Fetchers.gs', 'Signals.gs', 'Ledger.gs', 'Code.gs', 'Setup.gs'].forEach(f => vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), ctx, { filename: f }));
 
 // 讓 backfill 以 2026-11-20 為今天
 const RealNow = Date.now; Date.now = () => NOW;
 const got = vm.runInContext('backfillChips(25)', ctx);
 console.log('backfill 交易日:', got, '籌碼列數:', sheets['籌碼'].length - 1);
+// ---- 交易帳本測試：加碼、賣出、刪除 ----
+const post = b => JSON.parse(vm.runInContext('doPost(' + JSON.stringify({ postData: { contents: JSON.stringify(b) } }) + ').text', ctx));
+const k0 = vm.runInContext('setupApiKey()', ctx);
+const pos = () => vm.runInContext('readPortfolio_()', ctx);
+const r1 = post({ key: k0, action: 'addTx', tx: { code: '0050', side: 'buy', shares: 1000, price: 98, date: '2026-11-20' } });
+const p1 = pos().positions.find(h => h.code === '0050');
+console.log('加碼 0050:', r1.ok, '股數', p1.shares, '均價', p1.avg.toFixed(4), '成本', p1.cost, '(預期 (111667+98000+139)/2000)');
+const r2 = post({ key: k0, action: 'addTx', tx: { code: '0050', side: 'sell', shares: 500, price: 100, date: '2026-11-20' } });
+const pf2 = pos(); const p2 = pf2.positions.find(h => h.code === '0050');
+console.log('賣 500:', r2.ok, '剩', p2.shares, '已實現', pf2.realized, '持股頁列數', sheets['持股'].filter(r => r[0]).length - 1);
+console.log('超賣:', post({ key: k0, action: 'addTx', tx: { code: '0050', side: 'sell', shares: 99999, price: 100 } }).error);
+console.log('新股 2330 零股:', JSON.stringify(post({ key: k0, action: 'addTx', tx: { code: '2330', side: 'buy', shares: 10, price: 1880 } }).data.row));
+console.log('上櫃 6488:', post({ key: k0, action: 'addTx', tx: { code: '6488', side: 'buy', shares: 1000, price: 400 } }).data.row.slice(9, 11));
+console.log('錯代號:', post({ key: k0, action: 'addTx', tx: { code: '9999', side: 'buy', shares: 1, price: 1 } }).error);
+const sellId = sheets['交易紀錄'].find(r => r[3] === '賣出')[12];
+console.log('刪除賣出:', post({ key: k0, action: 'deleteTx', id: sellId }).ok, '0050 股數回到', pos().positions.find(h => h.code === '0050').shares);
+const t2330 = sheets['交易紀錄'].find(r => r[1] === '2330')[12], t6488 = sheets['交易紀錄'].find(r => r[1] === '6488')[12];
+post({ key: k0, action: 'deleteTx', id: t2330 }); post({ key: k0, action: 'deleteTx', id: t6488 });
+// 出清一檔：00929 全賣，測試已出清
+post({ key: k0, action: 'addTx', tx: { code: '00929', side: 'sell', shares: 1000, price: 18, date: '2026-11-21' } });
+console.log('代號表筆數:', vm.runInContext('securities_().list.length', ctx), '權證已排除:', !vm.runInContext('securities_().list.some(x=>x[0]==="700001")', ctx));
 const dash = vm.runInContext('getDashboard()', ctx);
+console.log('已出清:', JSON.stringify(dash.holdings.closed.map(c => [c.code, c.realized])), '累計已實現', dash.holdings.totals.realized);
 const live = vm.runInContext('getLive()', ctx);
 const hist = vm.runInContext('getHistory("00918","1y")', ctx);
 const key = vm.runInContext('setupApiKey()', ctx);
@@ -166,7 +206,7 @@ Date.now = RealNow;
 
 console.log('訊號:', dash.signals.items.map(i => i.key + '=' + i.state).join(' '), '|', dash.signals.summary);
 console.log('總市值', dash.holdings.totals.value, '損益', dash.holdings.totals.pnl, '淨', dash.holdings.totals.netPnl);
-console.log('00929 來源:', dash.holdings.rows.find(r => r.code === '00929').quoteSource);
+console.log('0050 來源:', dash.holdings.rows.find(r => r.code === '0050').quoteSource);
 console.log('00918 近12月配息:', hist.ttmDiv);
 console.log('錯誤:', dash.errors);
 fs.writeFileSync(path.join(OUT, 'dashboard.json'), JSON.stringify(dash, null, 1));
@@ -184,6 +224,8 @@ window.__MOCK__ = (function(){
     getLive: () => ({ asOf: Date.now(), market: dash.market, indicators: {}, holdings: dash.holdings }),
     getHistory: (id, range) => { const s = map[id] || (id + '.TW'); return { id, range, interval: range === '5y' ? '1wk' : '1d', points: Y[s], ttmDiv: id === '00918' ? 2.78 : null, source: '測試資料' }; },
     refreshChips: () => ({ ok: true, chips: dash.chips }),
+    getSecurities: () => ({ list: ${JSON.stringify(vm.runInContext('securities_()', ctx).list)}, asOf: Date.now() }),
+    addTx: p => ({ id: 'x' }), deleteTx: p => ({ deleted: p.id }),
   };
 })();
 </script>`;

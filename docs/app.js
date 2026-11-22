@@ -31,20 +31,31 @@ const ROUTES = {
   getLive: () => ({ api: 'live' }),
   getHistory: (id, range) => ({ api: 'history', id, range }),
   refreshChips: () => ({ api: 'refreshChips' }),
+  getSecurities: () => ({ api: 'securities' }),
 };
+
+function parseApi_(r) {
+  if (!r.ok) throw new Error('API 回應 ' + r.status);
+  return r.text().then(t => {
+    let j;
+    try { j = JSON.parse(t); } catch (e) { throw new Error('API 沒有回傳資料：請確認部署的存取權是「任何人」'); }
+    if (!j.ok) throw Object.assign(new Error(j.error === 'unauthorized' ? 'API 金鑰不正確' : j.error), { auth: j.error === 'unauthorized' });
+    return j.data;
+  });
+}
+
+/** 寫入（新增／刪除交易）。以 text/plain 送出，避免 CORS 預檢 */
+function apiPost(action, payload) {
+  if (window.__MOCK__) return Promise.resolve().then(() => window.__MOCK__[action](payload));
+  if (!CFG.url || !CFG.key) return Promise.reject(Object.assign(new Error('尚未設定 API 金鑰'), { auth: true }));
+  return fetch(CFG.url, { method: 'POST', redirect: 'follow', body: JSON.stringify(Object.assign({ key: CFG.key, action }, payload)) }).then(parseApi_);
+}
 
 function api(fn, ...args) {
   if (window.__MOCK__) return Promise.resolve().then(() => window.__MOCK__[fn](...args));
   if (!CFG.url || !CFG.key) return Promise.reject(Object.assign(new Error('尚未設定 API 金鑰'), { auth: true }));
   const q = new URLSearchParams(Object.assign(ROUTES[fn](...args), { key: CFG.key, _: Date.now() }));
-  return fetch(CFG.url + '?' + q.toString(), { redirect: 'follow' })
-    .then(r => { if (!r.ok) throw new Error('API 回應 ' + r.status); return r.text(); })
-    .then(t => {
-      let j;
-      try { j = JSON.parse(t); } catch (e) { throw new Error('API 沒有回傳資料：請確認部署的存取權是「任何人」'); }
-      if (!j.ok) throw Object.assign(new Error(j.error === 'unauthorized' ? 'API 金鑰不正確' : j.error), { auth: j.error === 'unauthorized' });
-      return j.data;
-    });
+  return fetch(CFG.url + '?' + q.toString(), { redirect: 'follow' }).then(parseApi_);
 }
 
 function renderSetup(msg) {
@@ -286,11 +297,13 @@ function renderHoldings() {
       <div class="kv"><div class="k">今日損益</div><div class="v num ${cls(t.dayPnl)}">${sMoney(t.dayPnl)}<small>${sgn(t.dayPct)}%</small></div></div>
       <div class="kv"><div class="k">投入成本</div><div class="v num">${money(t.cost)}</div></div>
       <div class="kv"><div class="k">若今天全部賣出（扣費稅）</div><div class="v num ${cls(t.netPnl)}">${sMoney(t.netPnl)}</div></div>
+      ${h.ledger ? `<div class="kv"><div class="k">已實現損益（累計）</div><div class="v num ${cls(t.realized)}">${sMoney(t.realized)}</div></div>` : ''}
     </div>
     <div class="alloc" role="img" aria-label="持股比重">${h.rows.map(r => `<span style="width:${(r.weight || 0).toFixed(2)}%;background:${colorOf(r.code)}" title="${esc(r.name)} ${fmt(r.weight, 1)}%"></span>`).join('')}</div>
     <div class="alloc-legend">${h.rows.slice().sort((a, b) => b.weight - a.weight).map(r => `<span><i style="background:${colorOf(r.code)}"></i>${esc(r.code)} <span class="num">${fmt(r.weight, 1)}%</span></span>`).join('')}</div>
     ${missing}
   </article>
+  ${h.ledger ? `<button class="btn primary wide" id="btnAddTx"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>新增交易（買進／賣出）</button>` : ''}
   <div class="sec-title"><h3>持股明細</h3>
     <div class="seg-ctl" role="group" aria-label="排序">
       ${[['weight', '比重'], ['pnl', '損益%'], ['day', '今日']].map(([k, l]) => `<button data-sort="${k}" aria-pressed="${S.sort === k}">${l}</button>`).join('')}
@@ -304,9 +317,11 @@ function renderHoldings() {
         <span class="pl num ${cls(r.pnl)}">${sMoney(r.pnl)}（${sgn(r.pnlPct)}%）</span></div>
     </button>`).join('')}
   </div>
+  ${h.closed && h.closed.length ? `<details class="card closed"><summary><b>已出清</b> <span class="muted small">${h.closed.length} 檔</span></summary>
+    <ul class="txlist">${h.closed.map(c => `<li><span>${esc(c.name)} <span class="muted num">${esc(c.code)}</span></span><span class="num ${cls(c.realized)}">${sMoney(c.realized)}</span></li>`).join('')}</ul></details>` : ''}
   <div class="row" style="justify-content:space-between;padding:4px">
-    <span class="muted small">手續費折扣 ${esc(S.data.settings.feeDiscount)}，ETF 交易稅 0.1%</span>
-    <a class="btn" href="${esc(S.data.sheetUrl)}" target="_blank" rel="noopener">在 Google Sheet 編輯持股</a>
+    <span class="muted small">手續費折扣 ${esc(S.data.settings.feeDiscount)}，ETF 交易稅 0.1%，平均成本法</span>
+    <a class="btn" href="${esc(S.data.sheetUrl)}" target="_blank" rel="noopener">在 Google Sheet 查看紀錄</a>
   </div>`;
 }
 
@@ -399,6 +414,7 @@ const RANGES = [['1mo', '1月', 31, '6mo'], ['3mo', '3月', 92, '1y'], ['6mo', '
 
 function openDetail(kind, id) {
   const opts = store.get('ma', { ma5: false, ma20: true, ma60: true, cost: true });
+  S.tx = null;
   S.detail = { kind, id, range: store.get('range', '6mo'), opts };
   $('#sheet').hidden = false;
   document.body.style.overflow = 'hidden';
@@ -408,7 +424,7 @@ function openDetail(kind, id) {
 
 function closeDetail() {
   const f = $('#figDetail'); if (f && f.__ro) f.__ro.disconnect();
-  $('#sheet').hidden = true; document.body.style.overflow = ''; S.detail = null;
+  $('#sheet').hidden = true; document.body.style.overflow = ''; S.detail = null; S.tx = null;
 }
 
 function detailItem() {
@@ -429,10 +445,19 @@ function renderDetail() {
       <div class="d-price num">${fmt(it.price, digits)}</div>
       <div class="num ${cls(it.chg)}">${sgn(it.chg, digits)}（${sgn(it.chgPct)}%）<span class="muted small">　${esc(D.kind === 'hold' ? it.quoteSource : it.source)} ${hhmm(D.kind === 'hold' ? it.quoteTime : it.time)}</span></div>
     </div>
+    ${D.kind === 'hold' && S.data.holdings.ledger ? `<div class="row act-row"><button class="btn" data-txopen="buy" data-txcode="${esc(it.code)}">加碼買進</button><button class="btn" data-txopen="sell" data-txcode="${esc(it.code)}">賣出</button></div>` : ''}
     <div class="ranges" role="group" aria-label="期間">${RANGES.map(r => `<button data-range="${r[0]}" aria-pressed="${D.range === r[0]}">${r[1]}</button>`).join('')}</div>
     <div class="toggles">${toggles.map(([k, l, c]) => `<label><input type="checkbox" data-opt="${k}" ${D.opts[k] ? 'checked' : ''}><i style="background:${c}"></i>${l}</label>`).join('')}</div>
     <div class="fig tall" id="figDetail"><div class="loading">載入走勢中…</div></div>
-    <div class="stats" id="dStats"></div>`;
+    <div class="stats" id="dStats"></div>
+    ${D.kind === 'hold' && it.txs ? `<div class="sec-title" style="margin:16px 4px 6px"><h3>交易明細</h3><span class="muted small">${it.txs.length} 筆</span></div>
+    <ul class="txlist card" id="txList">${it.txs.map(t => `<li>
+      <div><span class="tag ${t.side === 'buy' ? 'pos' : 'neg'}">${t.side === 'buy' ? '買進' : '賣出'}</span>
+        <span class="num">${esc(t.date || '期初')}</span>
+        <div class="num">${money(t.shares)} 股 × ${fmt(t.price, 2)}<span class="muted small">　費 ${money(t.fee)}${t.tax ? '　稅 ' + money(t.tax) : ''}</span></div>
+        ${ok(t.realized) ? `<div class="small">已實現 <b class="num ${cls(t.realized)}">${sMoney(t.realized)}</b></div>` : ''}
+        ${t.side === 'buy' && ok(it.price) ? `<div class="small muted">這筆目前 <b class="num ${cls((it.price - t.price) * t.shares)}">${sgn((it.price / t.price - 1) * 100)}%</b></div>` : ''}</div>
+      ${t.id ? `<button class="btn ghost small-btn" data-deltx="${esc(t.id)}">刪除</button>` : ''}</li>`).join('')}</ul>` : ''}`;
 }
 
 function loadDetail() {
@@ -489,6 +514,156 @@ function drawDetail(h) {
   $('#dStats').innerHTML = s;
 }
 
+/* ============ 新增交易 ============ */
+const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+
+function loadSecurities() {
+  const c = store.get('secs', null);
+  if (c && c.list && Date.now() - c.at < 12 * 3600e3) return Promise.resolve(c.list);
+  return api('getSecurities').then(r => { store.set('secs', { at: Date.now(), list: r.list }); return r.list; });
+}
+
+function secPool() {
+  const held = S.data.holdings.rows.map(r => [r.code, r.name, r.market === 'otc' ? 'o' : 't', r.price]);
+  const seen = new Set(held.map(h => h[0]));
+  return held.concat((S.secs || []).filter(s => !seen.has(s[0])));
+}
+
+function searchSecs(q) {
+  q = q.trim().toUpperCase();
+  if (!q) return [];
+  const out = [];
+  for (const s of secPool()) {
+    const c = s[0], n = String(s[1]).toUpperCase();
+    const sc = c === q ? 0 : c.startsWith(q) ? 1 : n.includes(q) ? 2 : c.includes(q) ? 3 : -1;
+    if (sc >= 0) out.push([sc, s]);
+  }
+  out.sort((a, b) => a[0] - b[0] || a[1][0].length - b[1][0].length || (a[1][0] < b[1][0] ? -1 : 1));
+  return out.slice(0, 30).map(x => x[1]);
+}
+
+const heldOf = code => S.data.holdings.rows.find(r => r.code === code);
+const calcFee = (amount, shares) => {
+  const st = S.data.settings, min = shares % 1000 ? st.oddMinFee : st.minFee;
+  return amount > 0 ? Math.max(min, Math.floor(amount * 0.001425 * st.feeDiscount)) : 0;
+};
+const calcTax = (amount, code) => Math.floor(amount * (/^00/.test(code) ? 0.001 : 0.003));
+
+function openTxForm(side, code) {
+  closeDetail();
+  S.tx = { side: side || 'buy', pick: null, feeEdited: false, taxEdited: false };
+  $('#sheet').hidden = false; document.body.style.overflow = 'hidden';
+  if (code) { const h = heldOf(code); if (h) S.tx.pick = [h.code, h.name, h.market === 'otc' ? 'o' : 't', h.price]; }
+  renderTxForm();
+  if (!S.secs) loadSecurities().then(l => { S.secs = l; if (S.tx && !S.tx.pick) txSearch(); })
+    .catch(e => { const r = $('#txResults'); if (r) r.innerHTML = `<li class="muted small">代號清單載入失敗（${esc(e.message || e)}），仍可搜尋已持有的股票</li>`; });
+}
+
+function renderTxForm() {
+  const T = S.tx, p = T.pick, held = p ? heldOf(p[0]) : null;
+  const sellable = S.data.holdings.rows.length > 0;
+  $('#sheetBody').innerHTML = `
+  <div class="d-head"><div class="d-name">新增交易</div><div class="muted small">平均成本法；手續費依設定的折扣自動計算，可以手動修改</div></div>
+  <div class="ranges side" role="group" aria-label="買賣">
+    <button type="button" data-side="buy" aria-pressed="${T.side === 'buy'}">買進</button>
+    <button type="button" data-side="sell" aria-pressed="${T.side === 'sell'}" ${sellable ? '' : 'disabled'}>賣出</button>
+  </div>
+  <form id="txForm" class="form" autocomplete="off" novalidate>
+    ${p ? `<div class="picked card">
+        <div><div class="d-name" style="font-size:17px">${esc(p[1])}</div>
+        <div class="muted small"><span class="num">${esc(p[0])}</span>　${p[2] === 'o' ? '上櫃' : '上市'}${held ? '　持有 <span class="num">' + money(held.shares) + '</span> 股・均價 <span class="num">' + fmt(held.avg, 2) + '</span>' : ''}</div></div>
+        <button type="button" class="btn ghost small-btn" data-unpick>更換</button></div>`
+    : `<label>股票代號或名稱<input id="txQ" type="search" inputmode="search" placeholder="例如 0056、台積電、高股息" enterkeyhint="search"></label>
+       <ul class="results" id="txResults">${T.side === 'sell' ? '' : '<li class="muted small">輸入代號或名稱開始搜尋</li>'}</ul>`}
+    ${!p && T.side === 'sell' ? '' : ''}
+    <div class="form-grid" ${p ? '' : 'hidden'}>
+      <label>交易日期<input name="date" type="date" value="${todayStr()}" max="${todayStr()}"></label>
+      <label>成交價<input name="price" type="text" inputmode="decimal" value="${p && ok(p[3]) ? p[3] : ''}"></label>
+      <label class="span2">股數<input name="shares" type="text" inputmode="numeric" value="${T.side === 'sell' && held ? held.shares : 1000}"></label>
+      <div class="span2 lots">${[[1000, '1 張'], [2000, '2 張'], [5000, '5 張'], [100, '100 股']].map(([v, l]) => `<button type="button" class="chip" data-lot="${v}">${l}</button>`).join('')}
+        ${T.side === 'sell' && held ? `<button type="button" class="chip" data-lot="${held.shares}">全部 ${money(held.shares)} 股</button>` : ''}</div>
+      <label>手續費<input name="fee" type="text" inputmode="numeric"></label>
+      ${T.side === 'sell' ? '<label>交易稅<input name="tax" type="text" inputmode="numeric"></label>' : '<span></span>'}
+      <label class="span2">備註（選填）<input name="note" type="text" maxlength="100" placeholder="例如：定期定額、跌深加碼"></label>
+    </div>
+    <div class="tx-sum card" id="txSum" ${p ? '' : 'hidden'}></div>
+    <div class="banner" id="txErr" hidden></div>
+    <button class="btn primary wide" type="submit" id="txSubmit" ${p ? '' : 'hidden'}>${T.side === 'buy' ? '確認買進' : '確認賣出'}</button>
+  </form>`;
+  if (p) updateTxSum(); else { const q = $('#txQ'); if (T.side === 'sell') txSearch(); setTimeout(() => q && q.focus(), 60); }
+}
+
+function txSearch() {
+  const box = $('#txResults'); if (!box) return;
+  const q = ($('#txQ') || {}).value || '';
+  let list;
+  if (S.tx.side === 'sell') list = S.data.holdings.rows.filter(r => !q || r.code.includes(q.toUpperCase()) || r.name.includes(q))
+    .map(r => [r.code, r.name, r.market === 'otc' ? 'o' : 't', r.price]);
+  else list = searchSecs(q);
+  if (!q && S.tx.side === 'buy') { box.innerHTML = `<li class="muted small">${S.secs ? '輸入代號或名稱開始搜尋' : '正在載入上市櫃代號清單…'}</li>`; return; }
+  box.innerHTML = list.length ? list.map(s => `<li><button type="button" data-pick="${esc(s[0])}">
+      <span class="num code">${esc(s[0])}</span><span class="nm">${esc(s[1])}${heldOf(s[0]) ? ' <span class="tag pos">持有</span>' : ''}</span>
+      <span class="num muted">${ok(s[3]) ? fmt(s[3], 2) : ''}</span></button></li>`).join('')
+    : `<li class="muted small">${S.secs || S.tx.side === 'sell' ? '找不到符合的股票' : '代號清單載入中…'}</li>`;
+}
+
+function txValues() {
+  const f = $('#txForm'); if (!f) return null;
+  const g = n => (f.elements[n] ? String(f.elements[n].value).replace(/,/g, '').trim() : '');
+  return { date: g('date'), price: Number(g('price')), shares: Math.round(Number(g('shares'))), fee: g('fee'), tax: g('tax'), note: g('note') };
+}
+
+function updateTxSum() {
+  const T = S.tx, p = T.pick, v = txValues(); if (!p || !v) return;
+  const f = $('#txForm'), held = heldOf(p[0]);
+  const amount = ok(v.price) && ok(v.shares) ? v.price * v.shares : 0;
+  if (!T.feeEdited) f.elements.fee.value = amount ? calcFee(amount, v.shares) : '';
+  if (T.side === 'sell' && !T.taxEdited) f.elements.tax.value = amount ? calcTax(amount, p[0]) : '';
+  const fee = Number(f.elements.fee.value) || 0, tax = T.side === 'sell' ? (Number(f.elements.tax.value) || 0) : 0;
+  let html;
+  if (T.side === 'buy') {
+    const total = amount + fee;
+    const newAvg = held ? (held.cost + total) / (held.shares + v.shares) : (v.shares ? total / v.shares : null);
+    html = `<div class="kv"><div class="k">總付出</div><div class="v num">${money(total)} 元</div></div>
+      <div class="kv"><div class="k">${held ? '加碼後平均成本' : '平均成本'}</div><div class="v num">${fmt(newAvg, 2)}${held ? `<small class="muted">原 ${fmt(held.avg, 2)}</small>` : ''}</div></div>`;
+  } else {
+    const net = amount - fee - tax, cost = held ? held.avg * v.shares : 0, pl = net - cost;
+    html = `<div class="kv"><div class="k">實收金額</div><div class="v num">${money(net)} 元</div></div>
+      <div class="kv"><div class="k">預估已實現損益</div><div class="v num ${cls(pl)}">${sMoney(pl)}<small>${cost ? sgn(pl / cost * 100) + '%' : ''}</small></div></div>`;
+  }
+  $('#txSum').innerHTML = html;
+}
+
+function submitTx() {
+  const T = S.tx, p = T.pick, v = txValues(), err = $('#txErr');
+  const fail = m => { err.hidden = false; err.textContent = m; };
+  err.hidden = true;
+  if (!p) return fail('請先選擇股票');
+  if (!(v.price > 0)) return fail('請輸入成交價');
+  if (!(v.shares > 0)) return fail('請輸入股數');
+  const held = heldOf(p[0]);
+  if (T.side === 'sell' && (!held || v.shares > held.shares)) return fail('賣出股數超過持有股數');
+  const btn = $('#txSubmit'); btn.disabled = true; btn.textContent = '寫入中…';
+  apiPost('addTx', { tx: { code: p[0], side: T.side, date: v.date, price: v.price, shares: v.shares, fee: v.fee, tax: T.side === 'sell' ? v.tax : '', note: v.note } })
+    .then(() => {
+      toast(`已記錄：${T.side === 'buy' ? '買進' : '賣出'} ${p[1]} ${money(v.shares)} 股`);
+      closeDetail(); S.hist = {}; load(true);
+    })
+    .catch(e => { fail(e.message || String(e)); btn.disabled = false; btn.textContent = T.side === 'buy' ? '確認買進' : '確認賣出'; });
+}
+
+function deleteTx(btn) {
+  if (btn.dataset.confirm !== '1') {
+    btn.dataset.confirm = '1'; btn.textContent = '再按一次確認'; btn.classList.add('danger');
+    setTimeout(() => { if (btn.isConnected) { btn.dataset.confirm = ''; btn.textContent = '刪除'; btn.classList.remove('danger'); } }, 4000);
+    return;
+  }
+  btn.disabled = true; btn.textContent = '刪除中…';
+  apiPost('deleteTx', { id: btn.dataset.deltx })
+    .then(() => { toast('已刪除這筆交易'); closeDetail(); load(true); })
+    .catch(e => { toast('刪除失敗：' + (e.message || e)); btn.disabled = false; btn.textContent = '刪除'; });
+}
+
 /* ============ 載入與刷新 ============ */
 function renderAll() {
   renderStatus(); renderOverview(); renderHoldings(); renderNotes(); renderChips();
@@ -539,6 +714,16 @@ document.addEventListener('click', e => {
   if (t.dataset.tab) return showTab(t.dataset.tab);
   if (t.id === 'btnRefresh') return load();
   if (t.id === 'btnSettings') return renderSetup();
+  if (t.id === 'btnAddTx') return openTxForm('buy');
+  if (t.dataset.txopen) return openTxForm(t.dataset.txopen, t.dataset.txcode);
+  if (t.dataset.deltx) return deleteTx(t);
+  if (S.tx) {
+    if (t.dataset.side && !t.disabled) { S.tx.side = t.dataset.side; S.tx.feeEdited = S.tx.taxEdited = false;
+      if (S.tx.side === 'sell' && S.tx.pick && !heldOf(S.tx.pick[0])) S.tx.pick = null; return renderTxForm(); }
+    if (t.dataset.pick) { S.tx.pick = secPool().find(s => s[0] === t.dataset.pick); return renderTxForm(); }
+    if (t.hasAttribute('data-unpick')) { S.tx.pick = null; return renderTxForm(); }
+    if (t.dataset.lot) { $('#txForm').elements.shares.value = t.dataset.lot; return updateTxSum(); }
+  }
   if (t.id === 'btnSetupCancel') return closeSetup();
   if (t.dataset.ind) return openDetail('ind', t.dataset.ind);
   if (t.dataset.code) return openDetail('hold', t.dataset.code);
@@ -567,7 +752,16 @@ document.addEventListener('change', e => {
   loadDetail();
 });
 
+document.addEventListener('input', e => {
+  if (!S.tx) return;
+  if (e.target.id === 'txQ') return txSearch();
+  if (e.target.name === 'fee') S.tx.feeEdited = true;
+  if (e.target.name === 'tax') S.tx.taxEdited = true;
+  if (e.target.closest('#txForm')) updateTxSum();
+});
+
 document.addEventListener('submit', e => {
+  if (e.target.id === 'txForm') { e.preventDefault(); return submitTx(); }
   if (e.target.id !== 'setupForm') return;
   e.preventDefault();
   const f = new FormData(e.target);

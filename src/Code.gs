@@ -17,7 +17,29 @@ function doGet(e) {
       case 'live': data = getLive(); break;
       case 'history': data = getHistory(String(p.id || ''), String(p.range || '6mo')); break;
       case 'refreshChips': data = refreshChips(); break;
+      case 'securities': data = securities_(); break;
       default: throw new Error('未知的 api：' + p.api);
+    }
+    return json_({ ok: true, data: data });
+  } catch (err) {
+    return json_({ ok: false, error: String((err && err.message) || err) });
+  }
+}
+
+/**
+ * 寫入用：POST body 為 JSON 字串 { key, action, ... }
+ * action: addTx { tx: {code, side, shares, price, date?, fee?, tax?, note?} } | deleteTx { id }
+ */
+function doPost(e) {
+  let body = {};
+  try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (err) { return json_({ ok: false, error: 'bad json' }); }
+  if (!checkKey_(body.key)) return json_({ ok: false, error: 'unauthorized' });
+  try {
+    let data;
+    switch (body.action) {
+      case 'addTx': data = addTx_(body.tx || {}); break;
+      case 'deleteTx': data = deleteTx_(String(body.id || '')); break;
+      default: throw new Error('未知的 action：' + body.action);
     }
     return json_({ ok: true, data: data });
   } catch (err) {
@@ -76,6 +98,11 @@ function normCode_(v) {
 /* ---------------- 持股 ---------------- */
 
 function readHoldings_() {
+  return readPortfolio_().positions;
+}
+
+/** 舊版：直接讀「持股」分頁（沒有交易紀錄分頁時使用） */
+function readHoldingsSheet_() {
   const sh = ss_().getSheetByName(CONFIG.SHEETS.HOLDINGS);
   if (!sh) return [];
   const rows = sh.getDataRange().getValues();
@@ -102,7 +129,12 @@ function sellCost_(value, type, st) {
   return { fee: fee, tax: Math.floor(value * taxRate) };
 }
 
-function enrichHoldings_(list, quotes, hist, st) {
+function settingsOut_(st) {
+  return { refreshSec: Number(st['自動刷新秒數']) || 60, feeDiscount: Number(st['手續費折扣']) || 1,
+    minFee: Number(st['最低手續費']) || 20, oddMinFee: Number(st['零股最低手續費']) || 1 };
+}
+
+function enrichHoldings_(list, quotes, hist, st, pf) {
   const rows = list.map(h => {
     const q = quotes[h.code] || null;
     const y = hist[h.code] || null;
@@ -141,7 +173,10 @@ function enrichHoldings_(list, quotes, hist, st) {
       netPnl: sum('netPnl'), dayPnl: sum('dayPnl'),
       dayPct: prevValue ? sum('dayPnl') / prevValue * 100 : null,
       missing: rows.filter(r => r.price === null).map(r => r.code),
+      realized: pf ? pf.realized : 0,
     },
+    closed: pf ? pf.closed : [],
+    ledger: pf ? pf.ledger : false,
   };
 }
 
@@ -210,7 +245,8 @@ function readNotes_() {
 function getDashboard() {
   const errors = [];
   const st = settings_();
-  const holdings = readHoldings_();
+  const pf = readPortfolio_();
+  const holdings = pf.positions;
 
   const yahooSyms = CONFIG.INDICATORS.map(i => i.yahoo).concat(holdings.map(yahooCode_));
   const hist = yahooMany_(yahooSyms, '1y', '1d');
@@ -233,10 +269,10 @@ function getDashboard() {
   return {
     asOf: Date.now(),
     market: marketState_(),
-    settings: { refreshSec: Number(st['自動刷新秒數']) || 60, feeDiscount: st['手續費折扣'] },
+    settings: settingsOut_(st),
     indicators: indicators,
     signals: computeSignals_(hist, mis, chips, st),
-    holdings: enrichHoldings_(holdings, mis, histByCode, st),
+    holdings: enrichHoldings_(holdings, mis, histByCode, st, pf),
     chips: chips,
     notes: readNotes_(),
     links: CONFIG.LINKS,
@@ -248,7 +284,8 @@ function getDashboard() {
 /** 盤中自動刷新：只更新台股即時報價與持股損益 */
 function getLive() {
   const st = settings_();
-  const holdings = readHoldings_();
+  const pf = readPortfolio_();
+  const holdings = pf.positions;
   const misCh = CONFIG.INDICATORS.filter(i => i.mis).map(i => i.mis).concat(holdingChannels_(holdings));
   const mis = misQuotes_(misCh);
   const hist = yahooMany_(holdings.map(yahooCode_), '1y', '1d'); // 已快取，不會重抓
@@ -260,7 +297,7 @@ function getLive() {
     if (q && q.price !== null) ind[i.key] = { price: q.price, prevClose: q.prevClose, chg: q.price - q.prevClose,
       chgPct: q.prevClose ? (q.price / q.prevClose - 1) * 100 : null, time: q.time, source: q.source };
   });
-  return { asOf: Date.now(), market: marketState_(), indicators: ind, holdings: enrichHoldings_(holdings, mis, histByCode, st) };
+  return { asOf: Date.now(), market: marketState_(), indicators: ind, holdings: enrichHoldings_(holdings, mis, histByCode, st, pf) };
 }
 
 /**
