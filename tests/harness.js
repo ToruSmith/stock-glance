@@ -56,7 +56,8 @@ const Y = {
   '009816.TW': series(260, 10, 14.2, 11.8, 0.012),
   '00985A.TW': series(260, 16, 21, 17.4, 0.012),
 };
-const DIVS = { '00918.TW': [[-300, 0.7], [-210, 0.7], [-120, 0.72], [-30, 0.66]], '00919.TW': [[-330, 0.72], [-240, 0.72], [-150, 0.7], [-60, 0.54]] };
+const DIVS = { '00918.TW': [[-300, 0.7], [-210, 0.7], [-120, 0.72], [-30, 0.66]], '00919.TW': [[-330, 0.72], [-240, 0.72], [-150, 0.7], [-60, 0.54]],
+  '00985A.TW': [[-32, 2.15]], '00929.TW': [[-90, 0.38], [-62, 0.38], [-30, 0.38]] };
 
 function chipsFor(ymd) {
   const d = new Date(ymd.slice(0, 4) + '-' + ymd.slice(4, 6) + '-' + ymd.slice(6) + 'T00:00:00Z');
@@ -193,7 +194,34 @@ post({ key: k0, action: 'deleteTx', id: t2330 }); post({ key: k0, action: 'delet
 // 出清一檔：00929 全賣，測試已出清
 post({ key: k0, action: 'addTx', tx: { code: '00929', side: 'sell', shares: 1000, price: 18, date: '2026-11-21' } });
 console.log('代號表筆數:', vm.runInContext('securities_().list.length', ctx), '權證已排除:', !vm.runInContext('securities_().list.some(x=>x[0]==="700001")', ctx));
+// ---- 配息入帳 ----
+let dashPre = vm.runInContext('getDashboard()', ctx);
+console.log('配息提醒（記錄前）:', JSON.stringify(dashPre.divHints.map(x => [x.code, x.exDate, x.perShare, x.shares, x.gross, x.deduct])));
+const rd = post({ key: k0, action: 'addTx', tx: { code: '00985A', side: 'div', shares: 1000, price: 2.15, date: '2026-11-13', note: '除息日 2026-10-19' } });
+console.log('記錄 00985A 配息:', rd.ok, JSON.stringify(rd.data && rd.data.row.slice(3, 9)));
+const rBig = post({ key: k0, action: 'addTx', tx: { code: '0050', side: 'div', shares: 20000, price: 1.5, date: '2026-11-10' } });
+console.log('大額配息自動預扣補充保費:', rBig.ok, '扣', rBig.data.row[6], '(預期', Math.round(30000 * 0.0211), ') 淨', rBig.data.row[8]);
+post({ key: k0, action: 'deleteTx', id: rBig.data.id });
+console.log('配息錯誤（沒持有）:', post({ key: k0, action: 'addTx', tx: { code: '2330', side: 'div', shares: 1, price: 1 } }).error);
+console.log('配息錯誤（扣除額過大）:', post({ key: k0, action: 'addTx', tx: { code: '00918', side: 'div', shares: 1000, price: 0.66, fee: 9999 } }).error);
+const pDiv = pos().positions.find(h => h.code === '00985A');
+console.log('00985A 股數不變:', pDiv.shares, '成本不變:', pDiv.cost, '累計領息:', pDiv.divs);
+// ---- 核心／衛星 ----
+console.log('設 00918 為核心:', post({ key: k0, action: 'setRole', code: '00918', role: '核心' }).ok, '持股頁角色欄:', sheets['持股'].find(r => r[0] === '00918')[8]);
+post({ key: k0, action: 'addTx', tx: { code: '0050', side: 'buy', shares: 100, price: 98, date: '2026-11-20' } }); // 觸發重建，角色要保留
+console.log('重建後角色保留:', sheets['持股'].find(r => r[0] === '00918')[8], '| 表頭:', sheets['持股'][0].join(','));
+console.log('不存在代號:', post({ key: k0, action: 'setRole', code: '2330', role: '核心' }).error);
 const dash = vm.runInContext('getDashboard()', ctx);
+console.log('配息提醒（記錄後）:', JSON.stringify(dash.divHints.map(x => [x.code, x.exDate])));
+console.log('分類:', dash.holdings.rows.map(r => r.code + ':' + r.style + '/' + r.asset + '/' + r.role + (r.roleSet ? '*' : '')).join(' '));
+console.log('類別比重:', JSON.stringify(dash.holdings.byAsset.map(g => [g.name, +g.weight.toFixed(1)])), '核心衛星:', JSON.stringify(dash.holdings.byRole.map(g => [g.name, +g.weight.toFixed(1)])));
+console.log('規則提醒:', dash.holdings.warnings);
+const t0 = dash.holdings.totals;
+console.log('累計領息', t0.divs, '含息損益', t0.totalPnl, '=', t0.pnl, '+', t0.openDivs, '| 全部成果', t0.allTimePnl);
+const r985 = dash.holdings.rows.find(r => r.code === '00985A');
+console.log('00985A 未實現', r985.pnl, r985.pnlPct.toFixed(2) + '%', '含息', r985.totalPnl, r985.totalPct.toFixed(2) + '%');
+console.log('classify 測試:', ['00679B|元大美債20年|', '00646|元大S&P500|', '00631L|元大台灣50正2|', '2330|台積電|', '00878|國泰永續高股息|', '00891|中信關鍵半導體|']
+  .map(x => { const [code, name, note] = x.split('|'); const c = vm.runInContext('classify_(' + JSON.stringify({ code, name, note, type: /^00/.test(code) ? 'ETF' : '股票' }) + ')', ctx); return code + '=' + c.style + '/' + c.asset + '/' + c.autoRole; }).join(' '));
 console.log('已出清:', JSON.stringify(dash.holdings.closed.map(c => [c.code, c.realized])), '累計已實現', dash.holdings.totals.realized);
 const live = vm.runInContext('getLive()', ctx);
 const hist = vm.runInContext('getHistory("00918","1y")', ctx);
@@ -225,7 +253,7 @@ window.__MOCK__ = (function(){
     getHistory: (id, range) => { const s = map[id] || (id + '.TW'); return { id, range, interval: range === '5y' ? '1wk' : '1d', points: Y[s], ttmDiv: id === '00918' ? 2.78 : null, source: '測試資料' }; },
     refreshChips: () => ({ ok: true, chips: dash.chips }),
     getSecurities: () => ({ list: ${JSON.stringify(vm.runInContext('securities_()', ctx).list)}, asOf: Date.now() }),
-    addTx: p => ({ id: 'x' }), deleteTx: p => ({ deleted: p.id }),
+    addTx: p => ({ id: 'x' }), deleteTx: p => ({ deleted: p.id }), setRole: p => ({ code: p.code, role: p.role }),
   };
 })();
 </script>`;

@@ -6,6 +6,9 @@
  * 部署設定：執行身分「我」、存取權「任何人」。資料由 API 金鑰保護。
  */
 
+/** API 版本：2 起支援配息入帳、資產分類與核心／衛星。網頁會依此判斷要不要開放新功能 */
+const API_VERSION = 2;
+
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (!p.api) return json_({ ok: true, name: 'Stock Glance API', hint: '請從 GitHub Pages 網頁使用' });
@@ -28,7 +31,8 @@ function doGet(e) {
 
 /**
  * 寫入用：POST body 為 JSON 字串 { key, action, ... }
- * action: addTx { tx: {code, side, shares, price, date?, fee?, tax?, note?} } | deleteTx { id }
+ * action: addTx { tx: {code, side:'buy'|'sell'|'div', shares, price, date?, fee?, tax?, note?} }
+ *       | deleteTx { id } | setRole { code, role:'核心'|'衛星'|'' }
  */
 function doPost(e) {
   let body = {};
@@ -39,6 +43,7 @@ function doPost(e) {
     switch (body.action) {
       case 'addTx': data = addTx_(body.tx || {}); break;
       case 'deleteTx': data = deleteTx_(String(body.id || '')); break;
+      case 'setRole': data = setRole_(String(body.code || ''), String(body.role || '')); break;
       default: throw new Error('未知的 action：' + body.action);
     }
     return json_({ ok: true, data: data });
@@ -109,7 +114,7 @@ function readHoldingsSheet_() {
   const head = rows.shift().map(h => String(h).trim());
   const col = name => head.indexOf(name);
   const iCode = col('代號'), iName = col('名稱'), iShares = col('股數'), iAvg = col('成交均價'),
-    iCost = col('投入成本'), iType = col('類型'), iMkt = col('市場'), iNote = col('備註');
+    iCost = col('投入成本'), iType = col('類型'), iMkt = col('市場'), iNote = col('備註'), iRole = col('角色');
   return rows.filter(r => r[iCode] !== '' && r[iCode] !== null).map(r => {
     const shares = Number(r[iShares]) || 0;
     const avg = Number(r[iAvg]) || 0;
@@ -118,7 +123,8 @@ function readHoldingsSheet_() {
     const type = iType >= 0 && r[iType] ? String(r[iType]) : (/^00/.test(code) ? 'ETF' : '股票');
     const mkt = iMkt >= 0 && String(r[iMkt]).indexOf('櫃') >= 0 ? 'otc' : 'tse';
     return { code: code, name: iName >= 0 ? String(r[iName]) : code, shares: shares, avg: avg, cost: cost,
-      type: type, market: mkt, note: iNote >= 0 ? String(r[iNote] || '') : '' };
+      type: type, market: mkt, note: iNote >= 0 ? String(r[iNote] || '') : '',
+      role: iRole >= 0 ? String(r[iRole] || '').trim() : '' };
   });
 }
 
@@ -131,7 +137,64 @@ function sellCost_(value, type, st) {
 
 function settingsOut_(st) {
   return { refreshSec: Number(st['自動刷新秒數']) || 60, feeDiscount: Number(st['手續費折扣']) || 1,
-    minFee: Number(st['最低手續費']) || 20, oddMinFee: Number(st['零股最低手續費']) || 1 };
+    minFee: Number(st['最低手續費']) || 20, oddMinFee: Number(st['零股最低手續費']) || 1,
+    satMax: limit_(st, '衛星比重上限(%)'), satOneMax: limit_(st, '單一衛星上限(%)') };
+}
+
+/** 設定分頁的百分比上限；空白或非數字時用預設值，0 代表不提醒 */
+function limit_(st, k) {
+  const v = Number(st[k]);
+  return isFinite(v) && st[k] !== '' && st[k] !== null ? v : CONFIG.DEFAULTS[k];
+}
+
+/* ---------------- 資產分類（類別比重與核心／衛星） ---------------- */
+
+/**
+ * 依代號、名稱與「備註」判斷：
+ *   style 風格：市值型｜高股息｜主動式｜主題型｜債券｜槓桿反向｜個股
+ *   asset 資產類別：台股｜海外股票｜債券
+ *   autoRole 預設角色：市值型、債券、海外市值型 → 核心；其他 → 衛星
+ * 判斷不準時，在 Sheet「持股」分頁的備註寫上「市值型」「高股息」「債券」「海外」等字即可覆蓋。
+ */
+function classify_(h) {
+  const code = String(h.code || ''), name = String(h.name || ''), note = String(h.note || '');
+  const s = name + ' ' + note;
+  const isEtf = /ETF/i.test(h.type || '') || /^00/.test(code);
+  let style;
+  if (/債/.test(s) || /^00\d{2,4}B$/.test(code)) style = '債券';
+  else if (/正2|反1|反向|槓桿/.test(name) || /^00\d{2,4}[LR]$/.test(code)) style = '槓桿反向';
+  else if (/主動/.test(s) || /^00\d{2,4}A$/.test(code)) style = '主動式';
+  else if (/高息|高股息|優息|股息|收益|填息|月配/.test(s)) style = '高股息';
+  else if (/市值|台灣50|台50|TOP\s?50|臺灣50|中型100|全球|美國|標普|S&P|那斯達克|日本|歐洲|全市場|指數/i.test(s)) style = '市值型';
+  else if (isEtf) style = '主題型';
+  else style = '個股';
+  let asset = '台股';
+  if (style === '債券') asset = '債券';
+  else if (/海外|全球|美國|標普|S&P|那斯達克|NASDAQ|費城|日本|日經|歐洲|中國|印度|越南|韓國|美股/i.test(s)) asset = '海外股票';
+  const autoRole = style === '市值型' || style === '債券' ? '核心' : '衛星';
+  return { style: style, asset: asset, autoRole: autoRole };
+}
+
+/** 依權重彙總成 [{ name, weight, value }]，由大到小 */
+function groupWeights_(rows, key, total) {
+  const m = {};
+  rows.forEach(r => { m[r[key]] = (m[r[key]] || 0) + (r.value || 0); });
+  return Object.keys(m).map(k => ({ name: k, value: m[k], weight: total ? m[k] / total * 100 : 0 }))
+    .sort((a, b) => b.value - a.value);
+}
+
+/** 依「設定」分頁的規則產生提醒 */
+function ruleWarnings_(rows, byRole, byAsset, st) {
+  const out = [];
+  const satMax = limit_(st, '衛星比重上限(%)'), oneMax = limit_(st, '單一衛星上限(%)');
+  const sat = byRole.filter(g => g.name === '衛星')[0];
+  if (satMax > 0 && sat && sat.weight > satMax + 0.05)
+    out.push('衛星部位合計占 ' + sat.weight.toFixed(1) + '%，超過你設定的上限 ' + satMax + '%');
+  if (oneMax > 0) rows.filter(r => r.role === '衛星' && r.weight > oneMax + 0.05).forEach(r =>
+    out.push(r.name + '（' + r.code + '）占 ' + r.weight.toFixed(1) + '%，超過單一衛星上限 ' + oneMax + '%'));
+  if (rows.length >= 2 && byAsset.length === 1)
+    out.push('全部持股都屬於「' + byAsset[0].name + '」，大盤下跌時會一起跌；可以考慮是否需要其他類別分散');
+  return out;
 }
 
 function enrichHoldings_(list, quotes, hist, st, pf) {
@@ -148,11 +211,19 @@ function enrichHoldings_(list, quotes, hist, st, pf) {
     const taxRate = /ETF/i.test(h.type) ? 0.001 : 0.003;
     const feeRate = 0.001425 * (Number(st['手續費折扣']) || 1);
     const breakeven = h.shares ? h.cost / (h.shares * (1 - feeRate - taxRate)) : null;
+    const divs = h.divs || 0;
+    const cl = classify_(h);
     return Object.assign({}, h, {
       price: price, prevClose: prev,
       chg: price !== null && prev ? price - prev : null,
       chgPct: price !== null && prev ? (price / prev - 1) * 100 : null,
       value: value, pnl: pnl, pnlPct: pnl !== null && h.cost ? pnl / h.cost * 100 : null,
+      // 含息損益＝未實現損益＋這一檔累計領到的配息
+      divs: divs,
+      totalPnl: pnl !== null ? pnl + divs : null,
+      totalPct: pnl !== null && h.cost ? (pnl + divs) / h.cost * 100 : null,
+      style: cl.style, asset: cl.asset, autoRole: cl.autoRole,
+      role: h.role === '核心' || h.role === '衛星' ? h.role : cl.autoRole, roleSet: h.role === '核心' || h.role === '衛星',
       netPnl: net, sellFee: sc.fee, sellTax: sc.tax,
       dayPnl: price !== null && prev ? Math.round((price - prev) * h.shares) : null,
       breakeven: breakeven,
@@ -165,19 +236,79 @@ function enrichHoldings_(list, quotes, hist, st, pf) {
   const totalValue = sum('value'), totalCost = sum('cost');
   rows.forEach(r => { r.weight = totalValue ? (r.value || 0) / totalValue * 100 : 0; });
   const prevValue = totalValue - sum('dayPnl');
+  const byAsset = groupWeights_(rows, 'asset', totalValue);
+  const byStyle = groupWeights_(rows, 'style', totalValue);
+  const byRole = groupWeights_(rows, 'role', totalValue);
+  const realized = pf ? pf.realized || 0 : 0;
+  const divsAll = pf && pf.divs !== undefined ? pf.divs : sum('divs'); // 含已出清持股領過的配息
+  const pnl = totalValue - totalCost;
   return {
     rows: rows,
     totals: {
-      value: totalValue, cost: totalCost, pnl: totalValue - totalCost,
+      value: totalValue, cost: totalCost, pnl: pnl,
       pnlPct: totalCost ? (totalValue / totalCost - 1) * 100 : null,
       netPnl: sum('netPnl'), dayPnl: sum('dayPnl'),
       dayPct: prevValue ? sum('dayPnl') / prevValue * 100 : null,
       missing: rows.filter(r => r.price === null).map(r => r.code),
-      realized: pf ? pf.realized : 0,
+      realized: realized,
+      divs: divsAll,
+      openDivs: sum('divs'),
+      // 目前持股的含息損益（未實現＋這些持股領過的配息）
+      totalPnl: pnl + sum('divs'),
+      totalPct: totalCost ? (pnl + sum('divs')) / totalCost * 100 : null,
+      // 從開始記帳到現在的全部成果：未實現＋已實現＋全部配息
+      allTimePnl: pnl + realized + divsAll,
     },
+    byAsset: byAsset, byStyle: byStyle, byRole: byRole,
+    warnings: ruleWarnings_(rows, byRole, byAsset, st),
     closed: pf ? pf.closed : [],
     ledger: pf ? pf.ledger : false,
   };
+}
+
+/**
+ * 找出「可能還沒記錄」的配息：Yahoo 的除息資料 × 除息日當時的持股，
+ * 但帳本裡沒有對應的配息紀錄（除息日前 10 天到後 75 天內）。
+ * 期初庫存沒有日期，視為一直持有，所以也可能列出你其實沒領到的配息，前端可以按「忽略」。
+ */
+function divHints_(positions, histByCode, st) {
+  const out = [];
+  const DAY = 86400000;
+  // 「設定」分頁可填「配息提醒起算日」（例如開始記帳的那天），更早的除息不提醒
+  const raw = st ? st['配息提醒起算日'] : null; // Sheet 的日期格會被 settings_() 轉成毫秒數
+  let start = null;
+  if (raw instanceof Date) start = raw.getTime();
+  else if (typeof raw === 'number' && raw > 1e11) start = raw;
+  else if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(String(raw || '').trim()))
+    start = Date.parse(String(raw).trim().replace(/\//g, '-').replace(/-(\d)(?=-|$)/g, '-0$1') + 'T00:00:00+08:00');
+  if (!isFinite(start)) start = null;
+  positions.forEach(h => {
+    const y = histByCode[h.code];
+    if (!y || !y.dividends || !y.dividends.length) return;
+    const txs = (h.txs || []).slice().reverse(); // 由舊到新
+    const trades = txs.filter(t => t.side !== 'div');
+    const divDates = txs.filter(t => t.side === 'div' && t.date).map(t => Date.parse(t.date + 'T00:00:00+08:00'));
+    const firstDated = trades.filter(t => t.date).map(t => Date.parse(t.date + 'T00:00:00+08:00'));
+    const hasUndated = trades.some(t => !t.date);
+    // 期初庫存沒有買進日期：沒設定起算日時只看近 120 天，避免把買進前的配息也列出來
+    const since = Math.max(Date.now() - (hasUndated && start === null ? 120 : 366) * DAY, start || 0);
+    y.dividends.forEach(d => {
+      if (!(d.t >= since) || !(d.amount > 0)) return;
+      if (!hasUndated && firstDated.length && d.t <= Math.min.apply(null, firstDated)) return;
+      // 除息日「之前」買進、且到除息日前一天還持有的股數
+      let sh = 0;
+      trades.forEach(t => {
+        const tt = t.date ? Date.parse(t.date + 'T00:00:00+08:00') : -Infinity;
+        if (tt < d.t - 12 * 3600000) sh += t.side === 'sell' ? -t.shares : t.shares;
+      });
+      if (sh <= 0) return;
+      if (divDates.some(t => t >= d.t - 10 * DAY && t <= d.t + 75 * DAY)) return;
+      const gross = Math.round(sh * d.amount);
+      out.push({ code: h.code, name: h.name, exDate: fmtDate_(new Date(d.t)), perShare: Math.round(d.amount * 10000) / 10000,
+        shares: sh, gross: gross, deduct: divDeduct_(gross), undated: hasUndated });
+    });
+  });
+  return out.sort((a, b) => a.exDate < b.exDate ? 1 : -1);
 }
 
 function holdingChannels_(list) {
@@ -267,12 +398,14 @@ function getDashboard() {
   const indicators = buildIndicators_(hist, mis);
 
   return {
+    apiVersion: API_VERSION,
     asOf: Date.now(),
     market: marketState_(),
     settings: settingsOut_(st),
     indicators: indicators,
     signals: computeSignals_(hist, mis, chips, st),
     holdings: enrichHoldings_(holdings, mis, histByCode, st, pf),
+    divHints: pf.ledger ? divHints_(holdings, histByCode, st) : [],
     chips: chips,
     notes: readNotes_(),
     links: CONFIG.LINKS,

@@ -39,7 +39,7 @@ function ensureSheets_() {
   const ss = ss_();
   const need = [
     [CONFIG.SHEETS.LEDGER, TX_HEAD],
-    [CONFIG.SHEETS.HOLDINGS, ['代號', '名稱', '股數', '成交均價', '投入成本', '類型', '市場', '備註']],
+    [CONFIG.SHEETS.HOLDINGS, HOLD_HEAD],
     [CONFIG.SHEETS.CHIPS, ['日期', '外資(億)', '投信(億)', '自營商(億)', '三大法人合計(億)', '融資餘額(億)', '融資增減(億)', '更新時間']],
     [CONFIG.SHEETS.NOTES, ['日期', '分類', '標題', '內容']],
     [CONFIG.SHEETS.SETTINGS, ['項目', '值', '說明']],

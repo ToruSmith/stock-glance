@@ -267,3 +267,20 @@ details.closed .txlist{padding:6px 0 0}
 .gloss-dl dt{font-size:12.5px;color:var(--accent);font-weight:700;margin-top:12px}
 .gloss-dl dd{margin:3px 0 0;font-size:15px;line-height:1.65}
 .gl-list{display:flex;flex-wrap:wrap;gap:8px}
+
+/* 含息損益、類別比重、規則提醒、配息提醒 */
+.hold .h-foot .pl-wrap{text-align:right}
+.hold .h-foot .pl-div{display:block;font-size:12px;font-weight:500;margin-top:2px}
+.alloc-title{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-top:16px}
+.alloc.thin{height:9px;margin:6px 0 6px}
+.style-line{font-size:12px;color:var(--muted);margin-top:6px}
+.rule-warn{margin-top:14px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--warn) 14%,var(--card));font-size:13px;line-height:1.55}
+.rule-warn ul{margin:4px 0 0;padding-left:18px}
+.rule-warn .muted{font-size:12px}
+#divhints summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:36px}
+#divhints summary::-webkit-details-marker{display:none}
+#divhints .txlist{padding:0}
+#divhints .hint-act{display:flex;gap:6px;flex:none}
+.tag.div{background:color-mix(in srgb,var(--warn) 16%,var(--card));color:var(--warn)}
+.role-row{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:12.5px;color:var(--muted)}
+.role-row .ranges{flex:none;width:160px}

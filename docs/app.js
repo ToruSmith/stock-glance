@@ -306,6 +306,8 @@ function renderHoldings() {
   });
   const colorOf = code => PALETTE[h.rows.findIndex(r => r.code === code) % PALETTE.length];
   const missing = t.missing && t.missing.length ? `<div class="muted small" style="margin-top:8px">以下代號暫無報價，未計入市值：${esc(t.missing.join('、'))}</div>` : '';
+  const st = S.data.settings || {};
+  const warns = h.warnings || [];
 
   $('#v-holdings').innerHTML = `
   <article class="card" id="pf-summary">
@@ -313,17 +315,26 @@ function renderHoldings() {
     <div class="kv"><div class="v big num">${money(t.value)}</div></div>
     <div class="sum-grid">
       <div class="kv"><div class="k">未實現損益 ${gi('UNREAL')}</div><div class="v num ${cls(t.pnl)}">${sMoney(t.pnl)}<small>${sgn(t.pnlPct)}%</small></div></div>
+      ${h.ledger ? `<div class="kv"><div class="k">含息損益 ${gi('TOTALRET')}</div><div class="v num ${cls(t.totalPnl)}">${sMoney(t.totalPnl)}<small>${sgn(t.totalPct)}%</small></div></div>` : ''}
       <div class="kv"><div class="k">今日損益 ${gi('DAY')}</div><div class="v num ${cls(t.dayPnl)}">${sMoney(t.dayPnl)}<small>${sgn(t.dayPct)}%</small></div></div>
       <div class="kv"><div class="k">投入成本</div><div class="v num">${money(t.cost)}</div></div>
       <div class="kv"><div class="k">若今天全部賣出（扣費稅） ${gi('NET')}</div><div class="v num ${cls(t.netPnl)}">${sMoney(t.netPnl)}</div></div>
-      ${h.ledger ? `<div class="kv"><div class="k">已實現損益（累計） ${gi('REAL')}</div><div class="v num ${cls(t.realized)}">${sMoney(t.realized)}</div></div>` : ''}
+      ${h.ledger ? `<div class="kv"><div class="k">已實現損益（累計） ${gi('REAL')}</div><div class="v num ${cls(t.realized)}">${sMoney(t.realized)}</div></div>
+      <div class="kv"><div class="k">累計領息 ${gi('DIV')}</div><div class="v num ${cls(t.divs)}">${sMoney(t.divs)}</div></div>` : ''}
     </div>
     <div class="muted small" style="margin-top:16px">持股比重 ${gi('WEIGHT')}</div>
     <div class="alloc" style="margin-top:6px" role="img" aria-label="持股比重">${h.rows.map(r => `<span style="width:${(r.weight || 0).toFixed(2)}%;background:${colorOf(r.code)}" title="${esc(r.name)} ${fmt(r.weight, 1)}%"></span>`).join('')}</div>
     <div class="alloc-legend">${h.rows.slice().sort((a, b) => b.weight - a.weight).map(r => `<span><i style="background:${colorOf(r.code)}"></i>${esc(r.code)} <span class="num">${fmt(r.weight, 1)}%</span></span>`).join('')}</div>
+    ${groupBar('資產類別', 'ASSET', h.byAsset, ASSET_COLOR)}
+    ${groupBar('核心／衛星', 'ROLE', h.byRole, ROLE_COLOR)}
+    ${h.byStyle && h.byStyle.length ? `<div class="style-line">風格：${h.byStyle.map(g => `${esc(g.name)} <span class="num">${fmt(g.weight, 1)}%</span>`).join('　')}</div>` : ''}
+    ${warns.length ? `<div class="rule-warn" role="note"><b>⚠️ 對照你的投資規則</b><ul>${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul>
+      <div class="muted">規則：衛星合計 ≤ ${esc(st.satMax)}%、單一衛星 ≤ ${esc(st.satOneMax)}%。可在 Sheet「設定」分頁修改，填 0 不提醒。這只是提醒，不是買賣建議。</div></div>` : ''}
     ${missing}
   </article>
-  ${h.ledger ? `<button class="btn primary wide" id="btnAddTx"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>新增交易（買進／賣出）</button>` : ''}
+  ${h.ledger && !apiV2() ? `<div class="banner">網頁已經更新，但 Apps Script 還是舊版，所以「配息入帳、含息損益、類別比重」還不能用。請依說明到 Apps Script 更新程式並重新部署。</div>` : ''}
+  ${h.ledger && apiV2() ? renderDivHints() : ''}
+  ${h.ledger ? `<button class="btn primary wide" id="btnAddTx"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>新增交易（買進／賣出${apiV2() ? '／配息' : ''}）</button>` : ''}
   <div class="sec-title"><h3>持股明細</h3>
     <div class="seg-ctl" role="group" aria-label="排序">
       ${[['weight', '比重'], ['pnl', '損益%'], ['day', '今日']].map(([k, l]) => `<button data-sort="${k}" aria-pressed="${S.sort === k}">${l}</button>`).join('')}
@@ -334,15 +345,69 @@ function renderHoldings() {
       ${spark(r.spark, ok(r.chg) && r.chg < 0 ? 'var(--down)' : 'var(--up)')}
       <div class="h-px num"><b>${fmt(r.price, 2)}</b><span class="${cls(r.chg)}">${sgn(r.chg, 2)} (${sgn(r.chgPct, 2)}%)</span></div>
       <div class="h-foot"><span class="muted">均價 <span class="num">${fmt(r.avg, 2)}</span>　市值 <span class="num">${money(r.value)}</span></span>
-        <span class="pl num ${cls(r.pnl)}">${sMoney(r.pnl)}（${sgn(r.pnlPct)}%）</span></div>
+        <span class="pl-wrap"><span class="pl num ${cls(r.pnl)}">${sMoney(r.pnl)}（${sgn(r.pnlPct)}%）</span>
+        ${r.divs ? `<span class="pl-div num ${cls(r.totalPnl)}">含息 ${sMoney(r.totalPnl)}（${sgn(r.totalPct)}%）</span>` : ''}</span></div>
     </button>`).join('')}
   </div>
   ${h.closed && h.closed.length ? `<details class="card closed"><summary><b>已出清</b> <span class="muted small">${h.closed.length} 檔</span></summary>
-    <ul class="txlist">${h.closed.map(c => `<li><span>${esc(c.name)} <span class="muted num">${esc(c.code)}</span></span><span class="num ${cls(c.realized)}">${sMoney(c.realized)}</span></li>`).join('')}</ul></details>` : ''}
+    <ul class="txlist">${h.closed.map(c => `<li><span>${esc(c.name)} <span class="muted num">${esc(c.code)}</span>${c.divs ? `<span class="muted small">　另領息 <span class="num">${money(c.divs)}</span></span>` : ''}</span><span class="num ${cls(c.realized)}">${sMoney(c.realized)}</span></li>`).join('')}</ul></details>` : ''}
   <div class="row" style="justify-content:space-between;padding:4px">
     <span class="muted small">手續費折扣 ${esc(S.data.settings.feeDiscount)} ${gi('FEE')}　平均成本法 ${gi('AVGCOST')}</span>
     <a class="btn" href="${esc(S.data.sheetUrl)}" target="_blank" rel="noopener">在 Google Sheet 查看紀錄</a>
   </div>`;
+}
+
+const ASSET_COLOR = { '台股': '#1d3fd8', '海外股票': '#0e9aa7', '債券': '#2f855a' };
+const ROLE_COLOR = { '核心': '#1d3fd8', '衛星': '#b83280' };
+
+/** 分組比重條（資產類別、核心／衛星） */
+function groupBar(title, gl, groups, colors) {
+  if (!groups || !groups.length) return '';
+  const c = (g, i) => colors[g.name] || PALETTE[(i + 3) % PALETTE.length];
+  return `<div class="alloc-title"><span class="muted small">${esc(title)} ${gi(gl)}</span></div>
+    <div class="alloc thin" role="img" aria-label="${esc(title)}">${groups.map((g, i) => `<span style="width:${(g.weight || 0).toFixed(2)}%;background:${c(g, i)}" title="${esc(g.name)} ${fmt(g.weight, 1)}%"></span>`).join('')}</div>
+    <div class="alloc-legend">${groups.map((g, i) => `<span><i style="background:${c(g, i)}"></i>${esc(g.name)} <span class="num">${fmt(g.weight, 1)}%</span></span>`).join('')}</div>`;
+}
+
+/* ---- 可能還沒記錄的配息 ---- */
+const hintKey = x => x.code + '@' + x.exDate;
+function visibleHints() {
+  const ign = new Set(store.get('divIgnore', []));
+  return (S.data.divHints || []).filter(x => !ign.has(hintKey(x)));
+}
+function renderDivHints() {
+  const list = visibleHints();
+  if (!list.length) return '';
+  const undated = list.some(x => x.undated);
+  return `<article class="card" id="divhints"><details ${list.length <= 3 ? 'open' : ''}>
+    <summary><span><b>📬 可能還沒記錄的配息</b> <span class="muted small">${list.length} 筆</span></span><span class="muted small">展開 ▾</span></summary>
+    <p class="sub">比對除息資料與你的持股找出來的。先到券商 App 或存摺確認<b>真的有入帳</b>，再按「記錄」；不是你的就按「忽略」。${gi('DIV')}</p>
+    <ul class="txlist">${list.map(x => `<li>
+      <div><div><b>${esc(x.name)}</b> <span class="muted num">${esc(x.code)}</span></div>
+        <div class="small muted">除息 <span class="num">${esc(x.exDate)}</span>・每股 <span class="num">${fmt(x.perShare, 4).replace(/0+$/, '').replace(/\.$/, '')}</span> 元 × <span class="num">${money(x.shares)}</span> 股</div>
+        <div class="small">約 <b class="num">${money(x.gross - x.deduct)}</b> 元${x.deduct ? `<span class="muted">（已預扣補充保費 ${money(x.deduct)}）</span>` : ''}</div></div>
+      <div class="hint-act"><button class="btn small-btn" data-divrec="${esc(hintKey(x))}">記錄</button><button class="btn ghost small-btn" data-divign="${esc(hintKey(x))}">忽略</button></div></li>`).join('')}</ul>
+    ${undated ? `<p class="muted small">期初庫存沒有買進日期，所以只列近 120 天的除息。想更精準，可在 Sheet「設定」分頁新增一列「配息提醒起算日」（例如開始記帳的日期）。</p>` : ''}
+    ${list.length > 1 ? `<button class="btn ghost small-btn" data-divignall>全部忽略</button>` : ''}
+  </details></article>`;
+}
+function ignoreHintsSilently(keys) {
+  const ign = new Set(store.get('divIgnore', []));
+  keys.forEach(k => ign.add(k));
+  store.set('divIgnore', Array.from(ign).slice(-300));
+}
+function ignoreHints(keys) { ignoreHintsSilently(keys); renderHoldings(); }
+
+/** 設定核心／衛星（role 空字串＝改回自動判斷） */
+function setRole(code, role, btn) {
+  if (btn) btn.disabled = true;
+  apiPost('setRole', { code, role }).then(() => {
+    const it = heldOf(code);
+    if (it) { it.roleSet = !!role; it.role = role || it.autoRole; }
+    toast(role ? `${code} 設為${role}` : `${code} 改回自動判斷`);
+    if (S.detail) { renderDetail(); loadDetail(); }
+    load(true);
+  }).catch(e => { toast('設定失敗：' + (e.message || e)); if (btn) btn.disabled = false; });
 }
 
 /* ============ 籌碼 ============ */
@@ -467,16 +532,23 @@ function renderDetail() {
       <div class="d-price num">${fmt(it.price, digits)}</div>
       <div class="num ${cls(it.chg)}">${sgn(it.chg, digits)}（${sgn(it.chgPct)}%）<span class="muted small">　${esc(D.kind === 'hold' ? it.quoteSource : it.source)} ${hhmm(D.kind === 'hold' ? it.quoteTime : it.time)}</span></div>
     </div>
-    ${D.kind === 'hold' && S.data.holdings.ledger ? `<div class="row act-row"><button class="btn" data-txopen="buy" data-txcode="${esc(it.code)}">加碼買進</button><button class="btn" data-txopen="sell" data-txcode="${esc(it.code)}">賣出</button></div>` : ''}
+    ${D.kind === 'hold' && S.data.holdings.ledger ? `<div class="row act-row"><button class="btn" data-txopen="buy" data-txcode="${esc(it.code)}">加碼買進</button><button class="btn" data-txopen="sell" data-txcode="${esc(it.code)}">賣出</button>${apiV2() ? `<button class="btn" data-txopen="div" data-txcode="${esc(it.code)}">記錄配息</button>` : ''}</div>` : ''}
+    ${D.kind === 'hold' && S.data.holdings.ledger && apiV2() ? `<div class="role-row"><span>角色 ${gi('ROLE')}</span>
+      <div class="ranges" role="group" aria-label="核心或衛星">${['核心', '衛星'].map(r => `<button data-role="${r}" data-rolecode="${esc(it.code)}" aria-pressed="${it.role === r}">${r}</button>`).join('')}</div>
+      <span>${it.roleSet ? `<button class="btn ghost small-btn" data-role="" data-rolecode="${esc(it.code)}">改回自動</button>` : `自動判斷：${esc(it.style || '')}`}</span></div>` : ''}
     <div class="ranges" role="group" aria-label="期間">${RANGES.map(r => `<button data-range="${r[0]}" aria-pressed="${D.range === r[0]}">${r[1]}</button>`).join('')}</div>
     <div class="toggles">${gi('MA')}${toggles.map(([k, l, c]) => `<label><input type="checkbox" data-opt="${k}" ${D.opts[k] ? 'checked' : ''}><i style="background:${c}"></i>${l}</label>`).join('')}</div>
     <div class="fig tall" id="figDetail"><div class="loading">載入走勢中…</div></div>
     <div class="stats" id="dStats"></div>
     ${D.kind === 'hold' && it.txs ? `<div class="sec-title" style="margin:16px 4px 6px"><h3>交易明細</h3><span class="muted small">${it.txs.length} 筆</span></div>
     <ul class="txlist card" id="txList">${it.txs.map(t => `<li>
+      ${t.side === 'div' ? `<div><span class="tag div">配息</span>
+        <span class="num">${esc(t.date || '—')}</span>
+        <div class="num">每股 ${fmt(t.price, 4).replace(/0+$/, '').replace(/\.$/, '')} × ${money(t.shares)} 股<span class="muted small">${t.fee ? '　扣 ' + money(t.fee) : ''}</span></div>
+        <div class="small">實收 <b class="num up">${sMoney(t.amount)}</b>${t.note ? `<span class="muted">　${esc(t.note)}</span>` : ''}</div>` : `
       <div><span class="tag ${t.side === 'buy' ? 'pos' : 'neg'}">${t.side === 'buy' ? '買進' : '賣出'}</span>
         <span class="num">${esc(t.date || '期初')}</span>
-        <div class="num">${money(t.shares)} 股 × ${fmt(t.price, 2)}<span class="muted small">　費 ${money(t.fee)}${t.tax ? '　稅 ' + money(t.tax) : ''}</span></div>
+        <div class="num">${money(t.shares)} 股 × ${fmt(t.price, 2)}<span class="muted small">　費 ${money(t.fee)}${t.tax ? '　稅 ' + money(t.tax) : ''}</span></div>`}
         ${ok(t.realized) ? `<div class="small">已實現 <b class="num ${cls(t.realized)}">${sMoney(t.realized)}</b></div>` : ''}
         ${t.side === 'buy' && ok(it.price) ? `<div class="small muted">這筆目前 <b class="num ${cls((it.price - t.price) * t.shares)}">${sgn((it.price / t.price - 1) * 100)}%</b></div>` : ''}</div>
       ${t.id ? `<button class="btn ghost small-btn" data-deltx="${esc(t.id)}">刪除</button>` : ''}</li>`).join('')}</ul>` : ''}`;
@@ -523,6 +595,8 @@ function drawDetail(h) {
     const yieldPct = ok(h.ttmDiv) && h.ttmDiv > 0 && ok(last) ? h.ttmDiv / last * 100 : null;
     s = cell('持有股數', money(it.shares), '', 'ODD') + cell('平均成本', fmt(it.avg, 2), '', 'AVGCOST') + cell('損益兩平價', fmt(it.breakeven, 2), '', 'BREAKEVEN') +
       cell('市值', money(it.value)) + cell('未實現損益', sMoney(it.pnl) + '（' + sgn(it.pnlPct) + '%）', cls(it.pnl), 'UNREAL') +
+      (S.data.holdings.ledger ? cell('累計領息', sMoney(it.divs || 0), cls(it.divs), 'DIV') +
+        cell('含息損益', sMoney(it.totalPnl) + '（' + sgn(it.totalPct) + '%）', cls(it.totalPnl), 'TOTALRET') : '') +
       cell('賣出淨損益', sMoney(it.netPnl), cls(it.netPnl), 'NET') + cell('今日損益', sMoney(it.dayPnl), cls(it.dayPnl), 'DAY') +
       cell('占投資組合', fmt(it.weight, 1) + '%', '', 'WEIGHT') +
       cell('近 12 月配息', ok(h.ttmDiv) && h.ttmDiv > 0 ? fmt(h.ttmDiv, 2) + ' 元' : '—', '', 'YIELD') +
@@ -565,31 +639,42 @@ function searchSecs(q) {
 }
 
 const heldOf = code => S.data.holdings.rows.find(r => r.code === code);
+/** Apps Script 是否已更新到支援配息與核心／衛星的版本（舊版會把配息當成買進，所以一定要擋） */
+const apiV2 = () => (S.data && S.data.apiVersion || 1) >= 2;
 const calcFee = (amount, shares) => {
   const st = S.data.settings, min = shares % 1000 ? st.oddMinFee : st.minFee;
   return amount > 0 ? Math.max(min, Math.floor(amount * 0.001425 * st.feeDiscount)) : 0;
 };
 const calcTax = (amount, code) => Math.floor(amount * (/^00/.test(code) ? 0.001 : 0.003));
+// 配息預估扣除額：單筆達 2 萬元預扣 2.11% 二代健保補充保費（實際只對 54C 部分扣，以入帳為準）
+const calcDivDeduct = gross => gross >= 20000 ? Math.round(gross * 0.0211) : 0;
+/** 可以記錄配息的標的：目前持有＋已出清 */
+const divPool = () => S.data.holdings.rows.map(r => [r.code, r.name, r.market === 'otc' ? 'o' : 't', r.price])
+  .concat((S.data.holdings.closed || []).filter(c => !heldOf(c.code)).map(c => [c.code, c.name, 't', null]));
 
-function openTxForm(side, code) {
+function openTxForm(side, code, prefill) {
   closeDetail();
-  S.tx = { side: side || 'buy', pick: null, feeEdited: false, taxEdited: false };
+  S.tx = { side: side || 'buy', pick: null, feeEdited: false, taxEdited: false, prefill: prefill || null };
   $('#sheet').hidden = false; document.body.style.overflow = 'hidden';
-  if (code) { const h = heldOf(code); if (h) S.tx.pick = [h.code, h.name, h.market === 'otc' ? 'o' : 't', h.price]; }
+  if (code) {
+    const h = heldOf(code);
+    if (h) S.tx.pick = [h.code, h.name, h.market === 'otc' ? 'o' : 't', h.price];
+    else if (S.tx.side === 'div') S.tx.pick = divPool().find(s => s[0] === code) || null;
+  }
   renderTxForm();
   if (!S.secs) loadSecurities().then(l => { S.secs = l; if (S.tx && !S.tx.pick) txSearch(); })
     .catch(e => { const r = $('#txResults'); if (r) r.innerHTML = `<li class="muted small">代號清單載入失敗（${esc(e.message || e)}），仍可搜尋已持有的股票</li>`; });
 }
 
 function renderTxForm() {
-  const T = S.tx, p = T.pick, held = p ? heldOf(p[0]) : null;
+  const T = S.tx;
+  if (T.side === 'div' && !apiV2()) T.side = 'buy';
+  if (T.side === 'div') return renderDivForm();
+  const p = T.pick, held = p ? heldOf(p[0]) : null;
   const sellable = S.data.holdings.rows.length > 0;
   $('#sheetBody').innerHTML = `
   <div class="d-head"><div class="d-name">新增交易</div><div class="muted small">平均成本法 ${gi('AVGCOST')}；手續費依設定的折扣自動計算，可以手動修改 ${gi('FEE')}</div></div>
-  <div class="ranges side" role="group" aria-label="買賣">
-    <button type="button" data-side="buy" aria-pressed="${T.side === 'buy'}">買進</button>
-    <button type="button" data-side="sell" aria-pressed="${T.side === 'sell'}" ${sellable ? '' : 'disabled'}>賣出</button>
-  </div>
+  ${sideSwitch(sellable)}
   <form id="txForm" class="form" autocomplete="off" novalidate>
     ${p ? `<div class="picked card">
         <div><div class="d-name" style="font-size:17px">${esc(p[1])}</div>
@@ -615,18 +700,57 @@ function renderTxForm() {
   if (p) updateTxSum(); else { const q = $('#txQ'); if (T.side === 'sell') txSearch(); setTimeout(() => q && q.focus(), 60); }
 }
 
+function sideSwitch(sellable) {
+  const T = S.tx, canDiv = apiV2() && divPool().length > 0;
+  return `<div class="ranges side" role="group" aria-label="交易類型">
+    <button type="button" data-side="buy" aria-pressed="${T.side === 'buy'}">買進</button>
+    <button type="button" data-side="sell" aria-pressed="${T.side === 'sell'}" ${sellable ? '' : 'disabled'}>賣出</button>
+    <button type="button" data-side="div" aria-pressed="${T.side === 'div'}" ${canDiv ? '' : 'disabled'}>配息</button>
+  </div>`;
+}
+
+/** 配息入帳表單：股數與平均成本不變，只累計「累計領息」 */
+function renderDivForm() {
+  const T = S.tx, p = T.pick, pf = T.prefill || {};
+  const held = p ? heldOf(p[0]) : null;
+  $('#sheetBody').innerHTML = `
+  <div class="d-head"><div class="d-name">記錄配息</div><div class="muted small">券商入帳後記一筆，帳面損益就會把配息算回來 ${gi('DIV')}</div></div>
+  ${sideSwitch(S.data.holdings.rows.length > 0)}
+  <form id="txForm" class="form" autocomplete="off" novalidate>
+    ${p ? `<div class="picked card">
+        <div><div class="d-name" style="font-size:17px">${esc(p[1])}</div>
+        <div class="muted small"><span class="num">${esc(p[0])}</span>${held ? '　持有 <span class="num">' + money(held.shares) + '</span> 股' : '　已出清'}</div></div>
+        <button type="button" class="btn ghost small-btn" data-unpick>更換</button></div>`
+    : `<label>股票代號或名稱<input id="txQ" type="search" inputmode="search" placeholder="例如 00929、高息" enterkeyhint="search"></label>
+       <ul class="results" id="txResults"></ul>`}
+    <div class="form-grid" ${p ? '' : 'hidden'}>
+      <label>入帳日期<input name="date" type="date" value="${esc(pf.date || todayStr())}" max="${todayStr()}"></label>
+      <label>每股配息（元）<input name="price" type="text" inputmode="decimal" value="${ok(pf.price) ? pf.price : ''}" placeholder="例如 0.38"></label>
+      <label class="span2">領息股數<input name="shares" type="text" inputmode="numeric" value="${ok(pf.shares) ? pf.shares : held ? held.shares : ''}"></label>
+      <label class="span2">扣除額（二代健保補充保費＋匯費）<input name="fee" type="text" inputmode="numeric"></label>
+      <label class="span2">備註（選填）<input name="note" type="text" maxlength="100" value="${esc(pf.note || '')}" placeholder="例如：除息日 2026-10-19"></label>
+    </div>
+    <p class="muted small" ${p ? '' : 'hidden'}>扣除額會自動預估（單筆 2 萬元以上預扣 2.11%），但 ETF 配息常常只有一部分要扣，<b>請以存摺或券商的實際入帳金額為準</b>，不同就直接改。</p>
+    <div class="tx-sum card" id="txSum" ${p ? '' : 'hidden'}></div>
+    <div class="banner" id="txErr" hidden></div>
+    <button class="btn primary wide" type="submit" id="txSubmit" ${p ? '' : 'hidden'}>確認記錄配息</button>
+  </form>`;
+  if (p) updateTxSum(); else { txSearch(); setTimeout(() => { const q = $('#txQ'); if (q) q.focus(); }, 60); }
+}
+
 function txSearch() {
   const box = $('#txResults'); if (!box) return;
   const q = ($('#txQ') || {}).value || '';
   let list;
   if (S.tx.side === 'sell') list = S.data.holdings.rows.filter(r => !q || r.code.includes(q.toUpperCase()) || r.name.includes(q))
     .map(r => [r.code, r.name, r.market === 'otc' ? 'o' : 't', r.price]);
+  else if (S.tx.side === 'div') list = divPool().filter(s => !q || s[0].includes(q.toUpperCase()) || String(s[1]).includes(q));
   else list = searchSecs(q);
   if (!q && S.tx.side === 'buy') { box.innerHTML = `<li class="muted small">${S.secs ? '輸入代號或名稱開始搜尋' : '正在載入上市櫃代號清單…'}</li>`; return; }
   box.innerHTML = list.length ? list.map(s => `<li><button type="button" data-pick="${esc(s[0])}">
-      <span class="num code">${esc(s[0])}</span><span class="nm">${esc(s[1])}${heldOf(s[0]) ? ' <span class="tag pos">持有</span>' : ''}</span>
+      <span class="num code">${esc(s[0])}</span><span class="nm">${esc(s[1])}${heldOf(s[0]) ? ' <span class="tag pos">持有</span>' : S.tx.side === 'div' ? ' <span class="tag">已出清</span>' : ''}</span>
       <span class="num muted">${ok(s[3]) ? fmt(s[3], 2) : ''}</span></button></li>`).join('')
-    : `<li class="muted small">${S.secs || S.tx.side === 'sell' ? '找不到符合的股票' : '代號清單載入中…'}</li>`;
+    : `<li class="muted small">${S.secs || S.tx.side !== 'buy' ? '找不到符合的股票' : '代號清單載入中…'}</li>`;
 }
 
 function txValues() {
@@ -639,6 +763,17 @@ function updateTxSum() {
   const T = S.tx, p = T.pick, v = txValues(); if (!p || !v) return;
   const f = $('#txForm'), held = heldOf(p[0]);
   const amount = ok(v.price) && ok(v.shares) ? v.price * v.shares : 0;
+  if (T.side === 'div') {
+    const gross = Math.round(amount);
+    if (!T.feeEdited) f.elements.fee.value = gross ? calcDivDeduct(gross) : '';
+    const ded = Number(f.elements.fee.value) || 0, net = gross - ded;
+    const newTotal = held && ok(held.totalPnl) ? held.totalPnl + net : null;
+    $('#txSum').innerHTML = `<div class="kv"><div class="k">應收（股數 × 每股配息）</div><div class="v num">${money(gross)} 元</div></div>
+      <div class="kv"><div class="k">實際入帳</div><div class="v num up">${money(net)} 元</div></div>
+      ${held && held.cost ? `<div class="kv"><div class="k">這次配息 ÷ 投入成本</div><div class="v num">${fmt(net / held.cost * 100, 2)}%</div></div>
+      <div class="kv"><div class="k">記錄後的含息損益</div><div class="v num ${cls(newTotal)}">${sMoney(newTotal)}<small>${sgn(newTotal / held.cost * 100)}%</small></div></div>` : ''}`;
+    return;
+  }
   if (!T.feeEdited) f.elements.fee.value = amount ? calcFee(amount, v.shares) : '';
   if (T.side === 'sell' && !T.taxEdited) f.elements.tax.value = amount ? calcTax(amount, p[0]) : '';
   const fee = Number(f.elements.fee.value) || 0, tax = T.side === 'sell' ? (Number(f.elements.tax.value) || 0) : 0;
@@ -661,6 +796,20 @@ function submitTx() {
   const fail = m => { err.hidden = false; err.textContent = m; };
   err.hidden = true;
   if (!p) return fail('請先選擇股票');
+  if (T.side === 'div') {
+    if (!(v.price > 0)) return fail('請輸入每股配息');
+    if (!(v.shares > 0)) return fail('請輸入領息股數');
+    const gross = Math.round(v.price * v.shares), ded = Number(v.fee) || 0;
+    if (ded < 0 || ded >= gross) return fail('扣除額不正確');
+    const btn = $('#txSubmit'); btn.disabled = true; btn.textContent = '寫入中…';
+    return apiPost('addTx', { tx: { code: p[0], side: 'div', date: v.date, price: v.price, shares: v.shares, fee: v.fee, note: v.note } })
+      .then(() => {
+        if (T.prefill && T.prefill.key) ignoreHintsSilently([T.prefill.key]);
+        toast(`已記錄配息：${p[1]} ${money(gross - ded)} 元`);
+        closeDetail(); S.hist = {}; load(true);
+      })
+      .catch(e => { fail(e.message || String(e)); btn.disabled = false; btn.textContent = '確認記錄配息'; });
+  }
   if (!(v.price > 0)) return fail('請輸入成交價');
   if (!(v.shares > 0)) return fail('請輸入股數');
   const held = heldOf(p[0]);
@@ -742,11 +891,25 @@ document.addEventListener('click', e => {
   if (t.id === 'btnAddTx') return openTxForm('buy');
   if (t.dataset.txopen) return openTxForm(t.dataset.txopen, t.dataset.txcode);
   if (t.dataset.deltx) return deleteTx(t);
+  if (t.dataset.divign) return ignoreHints([t.dataset.divign]);
+  if (t.hasAttribute('data-divignall')) return ignoreHints(visibleHints().map(hintKey));
+  if (t.dataset.divrec) {
+    const x = visibleHints().find(h => hintKey(h) === t.dataset.divrec); if (!x) return;
+    return openTxForm('div', x.code, { key: hintKey(x), price: x.perShare, shares: x.shares, note: '除息日 ' + x.exDate });
+  }
+  if (t.dataset.rolecode !== undefined && t.dataset.role !== undefined && S.detail) {
+    const it = heldOf(t.dataset.rolecode);
+    if (it && it.roleSet && it.role === t.dataset.role) return;
+    if (it && !it.roleSet && t.dataset.role === it.role) return setRole(t.dataset.rolecode, t.dataset.role, t); // 鎖定成手動
+    return setRole(t.dataset.rolecode, t.dataset.role, t);
+  }
   if (S.tx) {
     if (t.dataset.side && !t.disabled) { S.tx.side = t.dataset.side; S.tx.feeEdited = S.tx.taxEdited = false;
-      if (S.tx.side === 'sell' && S.tx.pick && !heldOf(S.tx.pick[0])) S.tx.pick = null; return renderTxForm(); }
-    if (t.dataset.pick) { S.tx.pick = secPool().find(s => s[0] === t.dataset.pick); return renderTxForm(); }
-    if (t.hasAttribute('data-unpick')) { S.tx.pick = null; return renderTxForm(); }
+      if (S.tx.side === 'sell' && S.tx.pick && !heldOf(S.tx.pick[0])) S.tx.pick = null;
+      if (S.tx.side === 'div' && S.tx.pick && !divPool().some(x => x[0] === S.tx.pick[0])) S.tx.pick = null;
+      return renderTxForm(); }
+    if (t.dataset.pick) { S.tx.pick = (S.tx.side === 'div' ? divPool() : secPool()).find(s => s[0] === t.dataset.pick); return renderTxForm(); }
+    if (t.hasAttribute('data-unpick')) { S.tx.pick = null; S.tx.prefill = null; return renderTxForm(); }
     if (t.dataset.lot) { $('#txForm').elements.shares.value = t.dataset.lot; return updateTxSum(); }
   }
   if (t.id === 'btnSetupCancel') return closeSetup();
